@@ -1,4 +1,5 @@
 import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
+import { assertEnvironmentRoute, type EnvironmentDescriptor } from '../shared/environment-routing';
 import { readableTerminalText, runnerShellCommand, type RunnerVerb } from '../shared/runner-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
@@ -55,6 +56,25 @@ export async function isRecognizedTab(tab: chrome.tabs.Tab): Promise<boolean> {
   return (verifiedOrigins as string[]).includes(new URL(tab.url).origin) || isT3Web(tab.url);
 }
 
+/** The public server descriptor is the authority for a direct connection's environment ID. */
+export async function describeEnvironment(tabId: number): Promise<EnvironmentDescriptor> {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN',
+    func: async () => {
+      try {
+        const response = await fetch('/.well-known/t3/environment', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) return null;
+        const value = await response.json();
+        if (typeof value?.environmentId !== 'string' || !value.environmentId.trim()) return null;
+        return { environmentId: value.environmentId, label: typeof value.label === 'string' ? value.label : value.environmentId };
+      } catch { return null; }
+    },
+  });
+  if (!result?.result) throw new Error('This tab does not directly serve a T3 environment. Hosted T3 Connect connections require a supported upstream integration bridge.');
+  assertEnvironmentRoute((await chrome.tabs.get(tabId)).url || '', result.result.environmentId);
+  return result.result;
+}
+
 const METHOD_ALLOWLIST = new Set([
   'orchestration.subscribeShell', 'orchestration.launchThread', 'orchestration.dispatchCommand',
   'projects.readFile', 'projects.writeFile', 'terminal.open', 'terminal.write', 'terminal.observe', 'terminal.close',
@@ -64,14 +84,30 @@ const METHOD_ALLOWLIST = new Set([
  * Runs a one-shot JSON Effect RPC request in the document's MAIN world, not an
  * extension origin. The browser sends the existing HttpOnly T3 session cookie
  * on the same-origin WebSocket handshake. No cookies/tokens are read or stored.
- * This only targets the T3 environment actually serving the page; a T3 Connect
- * client managing remote environments needs a separate authenticated bridge.
+ * This targets only the explicitly selected environment after checking its public
+ * descriptor. Remote T3 Connect connections need an upstream integration bridge.
  */
-export async function rpc<T>(tabId: number, method: string, payload: unknown, timeoutMs = 12000): Promise<T> {
+export async function rpc<T>(tabId: number, environmentId: string, method: string, payload: unknown, timeoutMs = 12000): Promise<T> {
   if (!METHOD_ALLOWLIST.has(method)) throw new Error(`T3 RPC method not allowed: ${method}`);
   const [result] = await chrome.scripting.executeScript({
-    target: { tabId }, world: 'MAIN', args: [method, payload, timeoutMs],
-    func: async (methodName: string, input: unknown, timeout: number) => {
+    target: { tabId }, world: 'MAIN', args: [environmentId, method, payload, timeoutMs],
+    func: async (expectedEnvironmentId: string, methodName: string, input: unknown, timeout: number) => {
+      // Both the descriptor and the route must match the selected environment.
+      // Never silently execute on app.t3.codes or on the wrong host.
+      let descriptor: { environmentId?: string };
+      try {
+        const response = await fetch('/.well-known/t3/environment', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error('missing descriptor');
+        descriptor = await response.json();
+      } catch {
+        return { ok: false, error: 'The selected T3 environment is not directly served by this tab; T3 Connect needs a supported upstream bridge.' };
+      }
+      if (!expectedEnvironmentId || descriptor.environmentId !== expectedEnvironmentId)
+        return { ok: false, error: 'T3 environment changed. Refresh the Companion environment selector before retrying.' };
+      const segments = location.pathname.split('/').filter(Boolean);
+      if (segments.length === 2 && !['settings', 'pair', 'guest', 'auth'].includes(segments[0]!) &&
+          decodeURIComponent(segments[0]!) !== expectedEnvironmentId)
+        return { ok: false, error: 'T3 is showing a different remote environment. Companion will not route RPC to the page host.' };
       const socketUrl = new URL('/ws', location.origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:'));
       // T3 Code v2 requires this protocol negotiation during the WebSocket upgrade.
       // Without it the server returns HTTP 426 before authenticating RPC calls.
@@ -120,25 +156,25 @@ export async function rpc<T>(tabId: number, method: string, payload: unknown, ti
   return data.value as T;
 }
 
-export async function shell(tabId: number): Promise<Shell> {
-  const value = await rpc<any>(tabId, 'orchestration.subscribeShell', {});
+export async function shell(tabId: number, environmentId: string): Promise<Shell> {
+  const value = await rpc<any>(tabId, environmentId, 'orchestration.subscribeShell', {});
   const threads = Array.isArray(value?.threads) ? value.threads : Array.isArray(value?.activeThreads) ? value.activeThreads : [];
   return { projects: value?.projects || [], threads };
 }
-export async function readProjectJson<T>(tabId: number, cwd: string, file: string, fallback: T): Promise<T> {
-  const result = await rpc<{contents: string; exists?: boolean; truncated: boolean}>(tabId, 'projects.readFile',
+export async function readProjectJson<T>(tabId: number, environmentId: string, cwd: string, file: string, fallback: T): Promise<T> {
+  const result = await rpc<{contents: string; exists?: boolean; truncated: boolean}>(tabId, environmentId, 'projects.readFile',
     { cwd, relativePath: `.t3/${file}`, allowMissing: true });
   if (result.exists === false) return fallback;
   if (result.truncated) throw new Error(`${file} exceeds the T3 read limit. Refusing to overwrite.`);
   return JSON.parse(result.contents) as T;
 }
-export async function writeProjectJson(tabId: number, cwd: string, file: string, data: unknown): Promise<void> {
-  await rpc(tabId, 'projects.writeFile', { cwd, relativePath: `.t3/${file}`, contents: `${JSON.stringify(data, null, 2)}\n` });
+export async function writeProjectJson(tabId: number, environmentId: string, cwd: string, file: string, data: unknown): Promise<void> {
+  await rpc(tabId, environmentId, 'projects.writeFile', { cwd, relativePath: `.t3/${file}`, contents: `${JSON.stringify(data, null, 2)}\n` });
 }
-export async function launchThread(tabId: number, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
+export async function launchThread(tabId: number, environmentId: string, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
   const model = project.defaultModelSelection || fallbackModel;
   if (!model) throw new Error('Select a default model in T3 project settings or open a T3 session first');
-  const result = await rpc<{threadId: string}>(tabId, 'orchestration.launchThread', {
+  const result = await rpc<{threadId: string}>(tabId, environmentId, 'orchestration.launchThread', {
     commandId: crypto.randomUUID(), creationSource: 'web', threadId: crypto.randomUUID(), projectId: project.id,
     title: prompt.slice(0, 80), modelSelection: model,
     runtimeMode: 'full-access', interactionMode: 'default', workspaceStrategy: { type: 'root' },
@@ -146,24 +182,24 @@ export async function launchThread(tabId: number, project: Project, prompt: stri
   });
   return result.threadId;
 }
-export async function sendThread(tabId: number, threadId: string, prompt: string): Promise<void> {
-  await rpc(tabId, 'orchestration.dispatchCommand', {
+export async function sendThread(tabId: number, environmentId: string, threadId: string, prompt: string): Promise<void> {
+  await rpc(tabId, environmentId, 'orchestration.dispatchCommand', {
     type: 'message.dispatch', commandId: crypto.randomUUID(), threadId, messageId: crypto.randomUUID(),
     text: prompt, attachments: [], createdBy: 'user', creationSource: 'web', dispatchMode: { type: 'queue_after_active' },
   });
 }
 
 /** Uses the T3 terminal only to run the installed t3-runner CLI; never keeps a runner alive through the terminal. */
-export async function runnerCommand(tabId: number, project: Project, hostThreadId: string, verb: RunnerVerb, target?: string): Promise<string> {
+export async function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string, verb: RunnerVerb, target?: string): Promise<string> {
   const id = crypto.randomUUID();
   const command = runnerShellCommand(verb, target);
   const marker = `COMPANION_${crypto.randomUUID().replaceAll('-', '')}`;
-  await rpc(tabId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
+  await rpc(tabId, environmentId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
   try {
     // Use a one-shot command, with a marker to distinguish output from shell prompts.
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await rpc(tabId, 'terminal.write', { threadId: hostThreadId, terminalId: id, data: `${command}; printf '\\n${marker}:%s\\n' "$?"\n` });
+        await rpc(tabId, environmentId, 'terminal.write', { threadId: hostThreadId, terminalId: id, data: `${command}; printf '\\n${marker}:%s\\n' "$?"\n` });
         break;
       } catch (error) {
         if (attempt === 4) throw error;
@@ -173,7 +209,7 @@ export async function runnerCommand(tabId: number, project: Project, hostThreadI
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 350));
-      const event = await rpc<any>(tabId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
+      const event = await rpc<any>(tabId, environmentId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
       const text = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
       const m = new RegExp(`${marker}:(\\d+)`).exec(text);
       if (m) {
@@ -189,6 +225,6 @@ export async function runnerCommand(tabId: number, project: Project, hostThreadI
     }
     throw new Error('Runner terminal command timed out. Inspect T3 terminal before retrying.');
   } finally {
-    await rpc(tabId, 'terminal.close', { threadId: hostThreadId, terminalId: id }).catch(() => {});
+    await rpc(tabId, environmentId, 'terminal.close', { threadId: hostThreadId, terminalId: id }).catch(() => {});
   }
 }
