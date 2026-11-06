@@ -14,6 +14,7 @@ export function runnerShellCommand(verb: RunnerVerb, target?: string): string {
     'if [ -f "' + runnerScript + '" ]; then node "' + runnerScript + '" ' + args,
     'elif command -v t3-runner >/dev/null 2>&1; then t3-runner ' + args,
     "else printf '%s\\n' 'T3_COMPANION_RUNNER_NOT_INSTALLED'; (exit 127)",
+    'fi',
   ].join('; ');
 }
 
