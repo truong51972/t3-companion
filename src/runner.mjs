@@ -83,6 +83,7 @@ export async function executeT3(job, project, { bin = process.env.T3_COMPANION_T
     child.stdout.on('data', (chunk) => output.push(chunk));
     child.stderr.on('data', (chunk) => errors.push(chunk));
     child.on('error', reject);
+    child.stdin.on('error', () => { /* The CLI may exit before consuming stdin. */ });
     child.on('close', (code) => {
       const stdout = Buffer.concat(output).toString('utf8');
       const stderr = Buffer.concat(errors).toString('utf8');
@@ -148,6 +149,7 @@ export async function runRunner({ root = rootDir(), once = false, intervalMs = 1
     }
     await Promise.all(active.values());
   } finally {
+    await Promise.allSettled(active.values());
     process.removeListener('SIGTERM', onSignal);
     process.removeListener('SIGINT', onSignal);
     await fs.rm(stopPath(root), { force: true });
