@@ -35,7 +35,7 @@ The Board and optional project Agent Skill can edit task definitions; the Runner
 }
 ```
 
-Runtime statuses: `dispatching | completed | blocked | failed | needs_reconciliation`. Runner persists `dispatching` **before** calling T3. On restart, it transitions stranded `dispatching` requests to `needs_reconciliation` and does not automatically relaunch them because the T3 thread might still be running. The first implementation uses `t3 thread start --wait --json`, so the T3 thread ID is recorded once the CLI returns; for a crash during launch, reconciliation requires inspecting T3 before manual retry.
+Runtime statuses: `dispatching | completed | blocked | failed | needs_reconciliation`. Runner stores execution metadata (including thread/run IDs and bounded errors), **not the full agent reply**, to keep the frequently-read runtime document small; full output remains available in the T3 thread. Legacy records may still contain a `reply` field. Runner persists `dispatching` **before** calling T3. On restart, it transitions stranded `dispatching` requests to `needs_reconciliation` and does not automatically relaunch them because the T3 thread might still be running. The first implementation uses `t3 thread start --wait --json`, so the T3 thread ID is recorded once the CLI returns; for a crash during launch, reconciliation requires inspecting T3 before manual retry.
 
 ## Consistency
 
