@@ -104,3 +104,19 @@ test('T3 adapter uses stdin, --wait and JSON without shell interpolation', async
   assert.equal(result.reply, prompt);
   assert.equal(result.threadId, 't1');
 });
+
+test('stop request drains running work and leaves pending jobs untouched', async (t) => {
+  const { root, projectDir } = await sandbox(t);
+  const project = await registerProject(projectDir, root);
+  await enqueueJob(project.id, 'first', {}, root);
+  await enqueueJob(project.id, 'second', {}, root);
+  let count = 0;
+  const { requestStop } = await import('../src/runner.mjs');
+  await runRunner({ root, intervalMs: 10, execute: async () => {
+    count++;
+    assert.equal(await requestStop(root), true);
+    return { state: 'completed' };
+  }});
+  assert.equal(count, 1);
+  assert.deepEqual((await listJobs(root)).map((job) => job.state).sort(), ['completed', 'pending']);
+});
