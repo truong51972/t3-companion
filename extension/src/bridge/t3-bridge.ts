@@ -1,5 +1,6 @@
 import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
-import { assertEnvironmentRoute, type EnvironmentDescriptor } from '../shared/environment-routing';
+import { describeSessionEnvironment, sessionRpc } from './page-session';
+export { listSessionEnvironments } from './page-session';
 import { readableTerminalText, runnerShellCommand, type RunnerVerb } from '../shared/runner-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
@@ -12,7 +13,7 @@ export async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
-/** Read-only DOM + PWA fingerprint check. Never touches T3 React state or page storage. */
+/** Read-only DOM + PWA fingerprint check. Session access happens only in the dedicated page adapter. */
 export async function detectTab(tab: chrome.tabs.Tab): Promise<boolean> {
   if (!tab.id || !isSafeOrigin(tab.url)) return false;
   try {
@@ -56,23 +57,9 @@ export async function isRecognizedTab(tab: chrome.tabs.Tab): Promise<boolean> {
   return (verifiedOrigins as string[]).includes(new URL(tab.url).origin) || isT3Web(tab.url);
 }
 
-/** The public server descriptor is the authority for a direct connection's environment ID. */
-export async function describeEnvironment(tabId: number): Promise<EnvironmentDescriptor> {
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId }, world: 'MAIN',
-    func: async () => {
-      try {
-        const response = await fetch('/.well-known/t3/environment', { credentials: 'same-origin', cache: 'no-store' });
-        if (!response.ok) return null;
-        const value = await response.json();
-        if (typeof value?.environmentId !== 'string' || !value.environmentId.trim()) return null;
-        return { environmentId: value.environmentId, label: typeof value.label === 'string' ? value.label : value.environmentId };
-      } catch { return null; }
-    },
-  });
-  if (!result?.result) throw new Error('This tab does not directly serve a T3 environment. Hosted T3 Connect connections require a supported upstream integration bridge.');
-  assertEnvironmentRoute((await chrome.tabs.get(tabId)).url || '', result.result.environmentId);
-  return result.result;
+/** Resolve the T3 Web-selected environment, or an explicitly selected session environment. */
+export async function describeEnvironment(tabId: number, preferredEnvironmentId = '') {
+  return describeSessionEnvironment(tabId, preferredEnvironmentId);
 }
 
 const METHOD_ALLOWLIST = new Set([
@@ -81,79 +68,12 @@ const METHOD_ALLOWLIST = new Set([
 ]);
 
 /**
- * Runs a one-shot JSON Effect RPC request in the document's MAIN world, not an
- * extension origin. The browser sends the existing HttpOnly T3 session cookie
- * on the same-origin WebSocket handshake. No cookies/tokens are read or stored.
- * This targets only the explicitly selected environment after checking its public
- * descriptor. Remote T3 Connect connections need an upstream integration bridge.
+ * Reuses the authorization of the T3 Web tab, including its remote DPoP session.
+ * Credentials and WebSocket tickets never leave the tab's MAIN world.
  */
 export async function rpc<T>(tabId: number, environmentId: string, method: string, payload: unknown, timeoutMs = 12000): Promise<T> {
-  if (!METHOD_ALLOWLIST.has(method)) throw new Error(`T3 RPC method not allowed: ${method}`);
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId }, world: 'MAIN', args: [environmentId, method, payload, timeoutMs],
-    func: async (expectedEnvironmentId: string, methodName: string, input: unknown, timeout: number) => {
-      // Both the descriptor and the route must match the selected environment.
-      // Never silently execute on app.t3.codes or on the wrong host.
-      let descriptor: { environmentId?: string };
-      try {
-        const response = await fetch('/.well-known/t3/environment', { credentials: 'same-origin', cache: 'no-store' });
-        if (!response.ok) throw new Error('missing descriptor');
-        descriptor = await response.json();
-      } catch {
-        return { ok: false, error: 'The selected T3 environment is not directly served by this tab; T3 Connect needs a supported upstream bridge.' };
-      }
-      if (!expectedEnvironmentId || descriptor.environmentId !== expectedEnvironmentId)
-        return { ok: false, error: 'T3 environment changed. Refresh the Companion environment selector before retrying.' };
-      const segments = location.pathname.split('/').filter(Boolean);
-      if (segments.length === 2 && !['settings', 'pair', 'guest', 'auth'].includes(segments[0]!) &&
-          decodeURIComponent(segments[0]!) !== expectedEnvironmentId)
-        return { ok: false, error: 'T3 is showing a different remote environment. Companion will not route RPC to the page host.' };
-      const socketUrl = new URL('/ws', location.origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:'));
-      // T3 Code v2 requires this protocol negotiation during the WebSocket upgrade.
-      // Without it the server returns HTTP 426 before authenticating RPC calls.
-      socketUrl.searchParams.set('orchestrationProtocol', '2');
-      const socket = new WebSocket(socketUrl);
-      const id = crypto.randomUUID();
-      return new Promise<{ ok: boolean; value?: unknown; error?: string }>(resolve => {
-        let done = false;
-        const finish = (value: { ok: boolean; value?: unknown; error?: string }) => {
-          if (done) return;
-          done = true; clearTimeout(timer);
-          try { socket.close(); } catch { /* ignore */ }
-          resolve(value);
-        };
-        const timer = setTimeout(() => finish({ ok: false, error: 'T3 RPC timed out' }), timeout);
-        socket.onerror = () => finish({ ok: false, error: 'T3 WebSocket connection failed (check T3 login and proxy upgrade)' });
-        socket.onclose = () => finish({ ok: false, error: 'T3 WebSocket closed before a response' });
-        socket.onopen = () => socket.send(JSON.stringify({ _tag: 'Request', id, tag: methodName, payload: input, headers: [] }));
-        socket.onmessage = (event) => {
-          try {
-            const frames = JSON.parse(event.data as string);
-            for (const item of (Array.isArray(frames) ? frames : [frames])) {
-              if (item.requestId !== id) continue;
-              if (item._tag === 'Chunk' && item.values?.length) {
-                const first = item.values[0];
-                // subscribeShell returns snapshot as the first streamed item.
-                if (methodName === 'orchestration.subscribeShell' && first?.kind === 'snapshot') {
-                  finish({ ok: true, value: first.snapshot }); return;
-                }
-                if (methodName === 'terminal.observe') { finish({ ok: true, value: first }); return; }
-              }
-              if (item._tag === 'Exit') {
-                finish(item.exit?._tag === 'Success' ? { ok: true, value: item.exit.value } :
-                  { ok: false, error: JSON.stringify(item.exit?.cause || item.exit || 'T3 RPC failed').slice(0, 900) });
-                return;
-              }
-            }
-          } catch (e) { finish({ ok: false, error: `Invalid T3 RPC frame: ${String(e)}` }); }
-        };
-      });
-    },
-  });
-  if (!result) throw new Error('No RPC result from T3 page');
-  const data = result.result;
-  if (!data?.ok) throw new Error(data?.error || 'T3 RPC failed');
-  return data.value as T;
+  if (!METHOD_ALLOWLIST.has(method)) throw new Error('T3 RPC method not allowed: ' + method);
+  return sessionRpc<T>(tabId, environmentId, method, payload, timeoutMs);
 }
 
 export async function shell(tabId: number, environmentId: string): Promise<Shell> {
