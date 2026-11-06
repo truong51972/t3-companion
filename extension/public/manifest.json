@@ -3,7 +3,7 @@
   "name": "T3 Companion",
   "short_name": "T3 Companion",
   "version": "0.1.0",
-  "description": "T3 Companion: Kanban, sessions and local runner management via authenticated T3 Web",
+  "description": "T3 Companion: environment-scoped Kanban and standalone runner management through verified T3 hosts",
   "minimum_chrome_version": "142",
   "action": {
     "default_title": "T3 Companion",
@@ -25,5 +25,10 @@
   ],
   "host_permissions": [
     "https://api.github.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ]
 }
