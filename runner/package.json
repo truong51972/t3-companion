@@ -3,9 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.16.0" },
+  "engines": {
+    "node": ">=22.16.0"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/cli.ts run",
     "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "bin": {
+    "t3-runner": "./bin/t3-runner.mjs"
   }
 }
