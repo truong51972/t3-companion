@@ -55,6 +55,13 @@ T3 Web would need an explicitly supported, permissioned extension interface:
 4. Return structured errors on disconnect/revocation or permissions change.
 5. Navigate using T3's own environment-scoped router.
 
+T3's public `/mcp` OAuth interface is a supported alternative for a
+**separately authorized** orchestration client. However, its current project
+and thread toolkits do not expose the direct `projects.readFile`,
+`projects.writeFile` and terminal operations required for Companion's
+file-based backlog and Runner controls. It is therefore not a drop-in
+replacement for this workflow.
+
 This requires upstream T3 cooperation. Until then, a separate OAuth/DPoP
 connection manager in Companion would duplicate a sensitive subsystem and
 is intentionally not introduced in this MVP.
