@@ -84,3 +84,20 @@ button.compact{padding:6px 10px}
 .sidepanel>.notice{margin:10px 16px 0}
 .sidepanel>.notice.success{border-color:#385243;background:#1c2c23;color:#b4d2bd}
 @media(max-width:700px){.sessions-layout{grid-template-columns:1fr}.session-list{max-height:220px;overflow:auto}.project-path{display:none}.project-row select{max-width:none;flex:1}.connection{font-size:0}.connection .status-dot{width:7px;height:7px}}
+
+/* Backlog cards open their native T3 thread when a safe link is available. */
+.task-open{display:block;width:100%;padding:0;text-align:left;border:0;border-radius:3px;background:transparent;color:inherit}
+.task-open:hover:not(:disabled){background:transparent;border:0}
+.task-open:focus-visible{outline-offset:4px}
+.task-open .task-head,.task-open .task-meta{display:flex}
+.task-open .task-description{display:-webkit-box}
+.linked-label{font-size:10px;color:#a3b6d7}
+.detail-field{display:grid;gap:8px;min-width:0}
+.detail-field>strong{font-size:12px;font-weight:620;color:#c4c6cb}
+.detail-field>p{font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.task-prompt{max-height:220px;overflow-y:auto;border:1px solid #33353a;border-radius:6px;background:#242529;padding:10px}
+.request-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;border-top:1px solid #33353a;padding:10px 0}
+.request-info{display:grid;gap:5px;min-width:0}
+.request-info span{font-size:11px;overflow-wrap:anywhere}
+.request-row button{flex-shrink:0}
+.request-error{color:#d7a39c}
