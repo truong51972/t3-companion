@@ -1,0 +1,42 @@
+# File contract v1
+
+The Extension owns task definitions; the Runner owns execution metadata. Both use the T3 environment's **project filesystem**, not a central server.
+
+## Registry — `~/.t3/runner/projects.json`
+
+`{"projects":["/absolute/project/path"]}`. No per-project registry files. If T3 Code uses `T3CODE_HOME`, the Runner follows that environment variable unless `T3_COMPANION_HOME` overrides it.
+
+## Tasks — `project/.t3/tasks.json`
+
+```json
+{
+  "version": 1,
+  "tasks": [{
+    "id": "task-uuid", "title": "Investigate failing tests", "description": "optional",
+    "prompt": "Find root cause and fix tests", "status": "todo", "priority": 2,
+    "executionRequests": [{ "requestId": "request-uuid", "worktree": "main", "notBefore": "2026-11-10T09:00:00+07:00" }]
+  }]
+}
+```
+
+`status` is independent of agent execution: `todo | in_progress | review | done`. Each request ID must be unique. A task can accumulate execution requests; append a new `requestId` for an intentional rerun. `notBefore` is an optional ISO 8601 timestamp. No shell commands are allowed.
+
+## Runtime — `project/.t3/runtime.json`
+
+```json
+{
+  "version": 1,
+  "requests": {
+    "request-uuid": {
+      "taskId": "task-uuid", "status": "dispatching",
+      "startedAt": "2026-11-10T09:00:00.000Z", "threadId": null
+    }
+  }
+}
+```
+
+Runtime statuses: `dispatching | completed | blocked | failed | needs_reconciliation`. Runner persists `dispatching` **before** calling T3. On restart, it transitions stranded `dispatching` requests to `needs_reconciliation` and does not automatically relaunch them because the T3 thread might still be running. The first implementation uses `t3 thread start --wait --json`, so the T3 thread ID is recorded once the CLI returns; for a crash during launch, reconciliation requires inspecting T3 before manual retry.
+
+## Consistency
+
+Runner writes with sibling temporary file plus atomic rename (same filesystem). It skips invalid JSON without resetting it. Extension must never write `runtime.json`; Runner must never rewrite `tasks.json`. Browser writes through T3's `projects.writeFile` need an atomicity/overwrite safety review during P1 before enabling CRUD. The Runner is the only writer to runtime per registered project; the runtime must not be modified by other processes.

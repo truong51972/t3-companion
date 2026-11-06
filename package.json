@@ -1,16 +1,11 @@
 {
   "name": "t3-companion",
-  "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
-  "bin": {
-    "t3-companion": "./bin/t3-companion.mjs"
-  },
+  "version": "0.1.0",
+  "workspaces": ["extension", "runner"],
   "scripts": {
-    "test": "node --test",
-    "start": "node bin/t3-companion.mjs runner run"
+    "build:extension": "npm run build --workspace extension",
+    "typecheck:extension": "npm run typecheck --workspace extension",
+    "test": "npm run test --workspace runner && node --experimental-strip-types --test extension/src/shared/*.test.ts"
   }
 }

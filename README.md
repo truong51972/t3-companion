@@ -1,62 +1,58 @@
 # T3 Companion
 
-A small, file-based companion for [T3 Code](https://github.com/pingdotgg/t3code). One repository, two responsibilities:
+**T3 Companion = Chromium Extension (Management UI) + independent local Runner (Automation) + T3 Code (agent runtime).** A lightweight, local-first design with no database or companion HTTP backend.
 
-- **Extension:** a thin, agent-facing management CLI (`t3-companion`), with reusable instructions in [`extension/SKILL.md`](extension/SKILL.md). No native T3 plugin API is assumed.
-- **Runner:** a standalone process that polls a durable local queue and dispatches to T3's *official* `t3 thread start ... --wait --json` CLI. T3 remains responsible for agents, models, permissions and worktrees.
+## Current implementation / phase status
 
-This is an initial vertical slice, **not** GitHub Issue synchronization or a custom agent framework. T3 Code already has native schedules and webhooks; those are not duplicated here.
+| Phase | Status |
+| --- | --- |
+| P0 Chromium MV3 popup + Side Panel + T3 site detection | Implemented in source; Chrome/Edge manual smoke test still required |
+| P1 Authenticated T3 Web RPC reuse | **PoC required**; RPC methods exist upstream, but browser authentication reuse is not verified |
+| P2 Project file contract | Documented and implemented in Runner; extension CRUD awaits P1 |
+| P3 Standalone polling Runner | Implemented with safe at-most-once dispatch, 3-worker limit |
+| P4 Extension runner management via terminal RPC | Pending P1 |
+| P5 Multi-environment verification, version checker | GitHub releases check implemented; multi-env testing pending |
 
-## Requirements
+### Extension (Chrome / Edge)
 
-Node.js >=22, a running T3 Code server, and the `t3` CLI on the Runner host. Register the intended projects in T3 Code first. No npm dependencies.
+Requires Node.js and npm to build the extension UI. In the repo root:
 
-~~~bash
-npm link
-# Or invoke directly: node bin/t3-companion.mjs ...
-t3-companion project add "$PWD"
-t3-companion runner start
-t3-companion job add "$PWD" --prompt 'Review the tests and propose fixes' --worktree main
-t3-companion job list
-t3-companion runner status
-t3-companion runner stop
-~~~
+```bash
+npm install
+npm run build:extension
+```
 
-Run interactively with `t3-companion runner run` or one scan with `t3-companion runner run --once`. `runner stop` drains active jobs, not a forced agent cancellation. The detached runner writes logs to `~/.t3/runner/runner.log`. For host-managed startup across reboot, run the foreground command under your preferred process supervisor (for example a systemd user service). A future T3-specific UI integration can call the same CLI.
+Navigate to `chrome://extensions` (or `edge://extensions`), enable **Developer mode**, select **Load unpacked**, and choose the generated `extension/dist/` directory. This uses Manifest V3, React + Vite + TypeScript. There is no content-script injection and no local backend. The popup detects supported T3 origins and opens a persistent Side Panel. In this P0 iteration the board and management controls remain disabled until the authenticated T3 bridge is validated; this is intentional, not a fully functional MVP.
 
-## Storage
+The popup can check GitHub Releases and open the latest release page. No releases published yet is handled as a non-error.
 
-Default home is `~/.t3/runner/`; override with `T3_COMPANION_HOME`. The runner never modifies `~/.t3/userdata`.
+### Runner (local to each T3 environment)
 
-~~~text
-~/.t3/runner/
-  projects/<hash>.json             # {id, path} only
-  jobs/pending/<uuid>.json
-  jobs/running/<uuid>.json
-  jobs/completed/<uuid>.json
-  jobs/blocked/<uuid>.json
-  jobs/failed/<uuid>.json
-  jobs/interrupted/<uuid>.json
-  runner.lock/owner.json           # only while running
-  runner.log                        # detached process logs
-~~~
+Requires **Node.js 22.16+** (`--experimental-strip-types`) and T3's official `t3` CLI available on the same host. Register the projects in T3 Code first.
 
-Jobs are claimed by atomic filesystem rename, dispatch is capped at three concurrent jobs, and a job without `--worktree` never overlaps another job on the same project checkout. T3's `--worktree <base-ref>` is passed through explicitly; the companion does not create or delete Git worktrees itself. `--wait` reports completion, failures and requests that need user input (`blocked`).
+```bash
+node --experimental-strip-types runner/src/cli.ts add /absolute/project/path
+node --experimental-strip-types runner/src/cli.ts list
+node --experimental-strip-types runner/src/cli.ts start
+node --experimental-strip-types runner/src/cli.ts status
+node --experimental-strip-types runner/src/cli.ts stop
+```
 
-**Crash semantics:** a job left in `running` at runner restart becomes `interrupted` and is **not automatically retried**. Its T3 thread might still be active. Inspect T3 and reconcile it before re-enqueueing to avoid duplicate work. This is at-most-once dispatch, not exactly-once execution. No automatic replay of unfinished agent turns is implemented.
+For a smoke test without the Extension bridge, enqueue a task via the CLI:
 
-## Boundaries
+```bash
+node --experimental-strip-types runner/src/cli.ts task add /absolute/project/path --title 'Check tests' --prompt 'Fix failing tests' --worktree main
+```
 
-- Registry JSON contains only a canonical project path plus its deterministic ID.
-- The queue and state files belong to the runner and are never committed to a project repository.
-- Stop via a file request; no `pkill` or unverified PID termination.
-- T3 CLI prompts are passed via stdin to avoid shell interpolation and exposing prompts in process arguments.
-- No database, Redis, broker, HTTP server, GitHub token or bespoke T3 protocol.
+Runner scans `~/.t3/runner/projects.json` every 10 seconds. Tasks and execution state live in each project's `.t3/tasks.json` and `.t3/runtime.json` respectively; see [docs/file-contract.md](docs/file-contract.md). The Runner is not kept alive by a T3 terminal. For boot persistence use your OS service manager (systemd user in Linux/WSL); `start` is a detached process, not an installed service. Stop is graceful: running T3 turns finish.
 
-## Roadmap
+### Safety and known boundaries
 
-1. Add GitHub Issue synchronization and explicit dispatch policy once the runner foundation is validated.
-2. Add an optional T3-facing management surface if T3 exposes a supported integration point.
-3. Add reconciliation against T3 thread state before implementing safe resumable jobs.
+- No direct Extension ↔ Runner HTTP connection, extra auth server, native T3 patch, or DOM integration.
+- T3 remains owner of agent sessions, approvals, worktrees and provider execution.
+- `dispatching` is written before each T3 CLI call; a crash requires explicit reconciliation to prevent duplicate sessions.
+- One Runner per registry; up to 3 concurrent requests. A plain project checkout is not processed concurrently with another plain request for the same project. Use T3-managed worktrees for isolated parallel runs.
+- Never overwrite invalid `tasks.json` or `runtime.json`.
+- Browser UI/sidepanel: P0 operational shell only; no claim of authenticated RPC functionality yet.
 
-Run tests with `npm test`.
+Run local Runner and site detection tests with `npm test`. Extension dependency installation, build and browser smoke tests have not been run in the offline development container.
