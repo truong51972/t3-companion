@@ -335,10 +335,6 @@ function App() {
     <header className="header">
       <div className="header-toolbar">
         <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
-        <nav className="nav" aria-label="Dashboard sections">{(['kanban','runner'] as Page[]).map(p =>
-          <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined} onClick={() => setPage(p)}>
-            {p === 'kanban' ? 'Board' : 'Runner'}
-          </button>)}</nav>
         <div className="header-actions">
           <span className={'connection ' + (recognized ? 'connected' : 'disconnected')} title={recognized ? 'T3 connected' : 'T3 offline'} aria-label={recognized ? 'T3 connected' : 'T3 offline'}><span className="status-dot"/></span>
           <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh connection" disabled={busy} onClick={() => void refresh()}>↻</button>
@@ -375,6 +371,11 @@ function App() {
         </label>
       </div>
     </header>
+    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','runner'] as Page[]).map(p =>
+      <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
+        onClick={() => setPage(p)}>
+        {p === 'kanban' ? 'Board' : 'Runner'}
+      </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
     {notice && <p className="notice success" role="status">{notice}</p>}
     {!recognized ? <section className="empty-view">
