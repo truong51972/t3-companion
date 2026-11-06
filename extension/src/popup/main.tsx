@@ -22,11 +22,8 @@ function Popup() {
         const recognized = await isRecognizedTab(t);
         if (!alive) return;
         setTab(t); setDetected(recognized);
-        if (t.id) {
-          await setPanelEnabled(t.id, recognized);
-          const state = await chrome.storage.session.get(`open:${t.id}`);
-          if (alive) setOpen(Boolean(state[`open:${t.id}`]));
-        }
+        const state = await chrome.storage.session.get(`open:window:${t.windowId}`);
+        if (alive) setOpen(Boolean(state[`open:window:${t.windowId}`]));
       } catch (e) { if (alive) setError(String(e)); }
       finally { if (alive) setChecking(false); }
     })();
