@@ -123,8 +123,8 @@ button.compact{padding:6px 10px}
 .request-error{color:#d7a39c}
 
 
-/* Compact context bar: one line for tab, environment and project. */
-.context-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1.1fr);align-items:end;gap:6px;min-width:0}
+/* Two-column context bar: T3 session tab selection is tucked into Connection settings. */
+.context-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:6px;min-width:0}
 .sidepanel .context-field{display:grid;gap:3px;min-width:0}
 .context-field>span{font-size:9px;line-height:11px;color:#8f9299;font-weight:560;letter-spacing:.02em}
 .sidepanel .context-field select{display:block;width:100%;height:27px;min-height:27px;min-width:0;max-width:100%;padding:3px 20px 3px 7px;border-radius:5px;border-color:#37393f;background-color:#222329;font-size:11px;line-height:18px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
@@ -159,3 +159,15 @@ button.compact{padding:6px 10px}
 .overview-description{font-size:11px;line-height:1.5;color:#b9bbc1}
 .skill-command{display:block;padding:8px;border:1px solid #35373d;border-radius:5px;background:#24262b;color:#b7bdca;font-size:10px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
 @media(max-width:375px){.overview-content{padding-left:9px;padding-right:9px}.overview-metric{padding-left:3px;padding-right:3px}.overview-metric span,.overview-breakdown-item{font-size:9px}}
+
+/* Small, keyboard-accessible settings menu instead of a persistent third dropdown. */
+.header-toolbar{position:relative;z-index:5}
+.connection-settings{position:relative;display:flex;align-items:center}
+.connection-settings>summary{list-style:none;cursor:pointer;display:grid;place-items:center;font-size:14px}
+.connection-settings>summary::-webkit-details-marker{display:none}
+.connection-settings[open]>summary,.connection-settings>summary:hover{background:#25272a}
+.connection-menu{position:absolute;right:-30px;top:calc(100% + 7px);width:min(310px,calc(100vw - 22px));max-width:calc(100vw - 22px);padding:12px;display:grid;gap:10px;border:1px solid #45474d;border-radius:7px;background:#25262b;box-shadow:0 12px 32px #0009;z-index:20}
+.connection-menu label{display:grid;gap:6px;font-size:11px;color:#cacbd0}
+.connection-menu select{width:100%}
+.connection-menu .runner-hint{line-height:1.4}
+.board-actions{display:flex;align-items:center;gap:8px}
