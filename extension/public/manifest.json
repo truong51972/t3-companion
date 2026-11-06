@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "T3 Companion",
+  "short_name": "T3 Companion",
+  "version": "0.1.0",
+  "description": "T3 Companion: environment-scoped Kanban and standalone runner management through verified T3 hosts",
+  "minimum_chrome_version": "142",
+  "action": {
+    "default_title": "T3 Companion",
+    "default_popup": "popup.html"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "tabs",
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://api.github.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ]
+}
