@@ -17,6 +17,22 @@ test('ordinary commands use a fixed adapter rather than encoded JavaScript', () 
   assert.ok(command.length < 900, 'status must remain a compact command');
 });
 
+test('start/stop commands use an even smaller launcher and fail explicitly if not set up', () => {
+  const command = runnerShellCommand('start', undefined, MARKER);
+  assert.ok(command.length < 500, 'routine commands should be very short');
+  assert.ok(command.includes('runner-control.cjs'));
+  const script = command.slice('node -e "'.length).split('" -- ')[0];
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-direct-'));
+  try {
+    const child = spawnSync(process.execPath, ['-e', script, '--', 'start', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+    });
+    assert.equal(child.status, 1);
+    assert.match(child.stdout, /T3_COMPANION_ERROR:/);
+    assert.ok(child.stdout.includes(MARKER + ':1'));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test('project arguments are inert base64url data, not executable shell source', () => {
   const target = "/projects/ümlaut 'repo' $(touch /tmp/pwn) & whoami";
   const command = runnerShellCommand('add', target, MARKER);
