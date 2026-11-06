@@ -239,7 +239,8 @@ function App() {
     try {
       // A per-origin permission grants MAIN-world execution on a non-active tab.
       // This is permission to reach that site, not a T3 authentication credential.
-      const origin = new URL(tab.url).origin + '/*';
+      const site = new URL(tab.url);
+      const origin = site.protocol + '//' + site.hostname + '/*';
       const granted = await chrome.permissions.request({ origins: [origin] });
       if (!granted) throw new Error('Browser permission for the selected T3 host was declined.');
       setManualTabId(id);
