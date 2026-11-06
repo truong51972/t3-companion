@@ -58,6 +58,8 @@ function App() {
   const [runnerResult, setRunnerResult] = useState('Not checked');
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
+  const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
+  const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
 
@@ -182,7 +184,7 @@ function App() {
       <div className="row">
         <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
         <div className="header-actions">
-          <span className={'connection ' + (recognized ? 'connected' : 'disconnected')}><span className="status-dot"/>{recognized ? 'Connected' : 'Offline'}</span>
+          <span className={'connection ' + (recognized ? 'connected' : 'disconnected')}><span className="status-dot"/>{recognized ? 'Detected' : 'Offline'}</span>
           <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh" disabled={busy} onClick={() => void refresh()}>↻</button>
         </div>
       </div>
@@ -274,7 +276,7 @@ function App() {
       </div>
     </section>
     : <section className="runner-view">
-      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className="muted">Local service</span></div></div>
+      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className={"runner-state " + (runnerRunning === "true" ? "running" : runnerRunning === "false" ? "stopped" : "")}>{runnerRunning === "true" ? "Running" : runnerRunning === "false" ? "Stopped" : "Not checked"}{runnerPid ? " · PID " + runnerPid : ""}</span></div></div>
       <div className="runner-section">
         <p className="muted">Commands use the selected T3 environment. The service runs independently of the browser.</p>
         <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
