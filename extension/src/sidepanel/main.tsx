@@ -86,6 +86,12 @@ function App() {
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
+  // Success notices are transient; errors remain until the next action.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   useEffect(() => {
     const closeOnOutsideClick = (event: PointerEvent) => {
       const menu = runnerProjectsMenu.current;
@@ -332,7 +338,7 @@ function App() {
       if (scopedKey.current === key) {
         runnerPollPaused.current = false;
         setRunnerResult(result);
-        if (verb !== 'status') setNotice('Runner: ' + verb);
+        if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
     } catch (err) {
       if (scopedKey.current === key) setRunnerResult('Runner check failed: ' + String(err));
