@@ -1,6 +1,6 @@
 ---
 name: t3-companion
-description: Manage a T3 Companion project's file-based backlog and execution queue using bundled scripts, without manually editing .t3 JSON.
+description: Manage project tasks and coordinate coding agents through T3 Companion. Use when planning a backlog, creating or updating tasks, setting priorities, or queueing and scheduling work for T3 Runner.
 ---
 
 # T3 Companion task management
