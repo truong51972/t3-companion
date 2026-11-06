@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { activeTab, isRecognizedTab, launchThread, readProjectJson, rpc, runnerCommand, sendThread, shell, writeProjectJson } from '../bridge/t3-bridge';
 import type { Project, Thread } from '../bridge/t3-bridge';
@@ -44,6 +44,12 @@ function App() {
   const [tasks, setTasks] = useState<Tasks>(emptyTasks());
   const [runtime, setRuntime] = useState<Runtime>(emptyRuntime());
   const [editing, setEditing] = useState<Task | null>(null);
+  const [queueTarget, setQueueTarget] = useState<Task | null>(null);
+  const editorDialog = useRef<HTMLDialogElement>(null);
+  const queueDialog = useRef<HTMLDialogElement>(null);
+  const filesVersion = useRef(0);
+  const shellVersion = useRef(0);
+  const manualProject = useRef(false);
   const [draft, setDraft] = useState<Task>(blank());
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
@@ -52,43 +58,67 @@ function App() {
   const [runnerResult, setRunnerResult] = useState('Not checked');
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
+  useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
+  useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
 
-  const refreshShell = useCallback(async (id: number) => {
+  const refreshShell = useCallback(async (id: number, url: string) => {
+    const version = ++shellVersion.current;
     const next = await shell(id);
+    if (version !== shellVersion.current) return;
     setProjects(next.projects); setThreads(next.threads);
-    setProjectId(old => next.projects.some(p => p.id === old) ? old : next.projects[0]?.id || '');
+    // Match a thread id from the authenticated shell to a complete URL segment.
+    // The URL is an orientation hint, not authentication or a DOM-based guess.
+    const segments = new URL(url).pathname.split('/');
+    const activeThread = next.threads.find(t => segments.includes(t.id));
+    setProjectId(old => {
+      if (!manualProject.current && activeThread && next.projects.some(p => p.id === activeThread.projectId)) return activeThread.projectId;
+      return next.projects.some(p => p.id === old) ? old : next.projects[0]?.id || '';
+    });
   }, []);
   const refreshFiles = useCallback(async (id: number, project: Project) => {
+    const version = ++filesVersion.current;
     const [nextTasks, nextRuntime] = await Promise.all([
       readProjectJson<Tasks>(id, project.workspaceRoot, 'tasks.json', emptyTasks()),
       readProjectJson<Runtime>(id, project.workspaceRoot, 'runtime.json', emptyRuntime()),
     ]);
-    setTasks(validateTasks(nextTasks)); setRuntime(validateRuntime(nextRuntime));
+    const checkedTasks = validateTasks(nextTasks), checkedRuntime = validateRuntime(nextRuntime);
+    if (version !== filesVersion.current) return;
+    setTasks(checkedTasks); setRuntime(checkedRuntime);
   }, []);
   const refresh = useCallback(async () => {
     setBusy(true); setError('');
     try {
       const tab = await activeTab(); setTabId(tab.id || null); setTabUrl(tab.url || '');
       const detected = await isRecognizedTab(tab); setRecognized(detected);
-      if (detected && tab.id) await refreshShell(tab.id);
+      if (detected && tab.id) await refreshShell(tab.id, tab.url || '');
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }, [refreshShell]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
+    filesVersion.current++;
+    setTasks(emptyTasks()); setRuntime(emptyRuntime());
     if (!tabId || !currentProject || !recognized) return;
-    let mounted = true;
-    void refreshFiles(tabId, currentProject).catch(e => { if (mounted) setError(String(e)); });
-    return () => { mounted = false; };
+    let active = true;
+    void refreshFiles(tabId, currentProject).catch(e => { if (active) setError(String(e)); });
+    return () => { active = false; filesVersion.current++; };
   }, [tabId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
     const changed = () => void refresh();
+    const updated = (_id: number, change: chrome.tabs.TabChangeInfo) => {
+      if (change.url || change.status === 'complete') void refresh();
+    };
     chrome.tabs.onActivated.addListener(changed);
-    // Same T3 tab can navigate between threads without losing the Side Panel state.
-    chrome.tabs.onUpdated.addListener(changed);
-    return () => { chrome.tabs.onActivated.removeListener(changed); chrome.tabs.onUpdated.removeListener(changed); };
+    chrome.tabs.onUpdated.addListener(updated);
+    return () => { chrome.tabs.onActivated.removeListener(changed); chrome.tabs.onUpdated.removeListener(updated); };
   }, [refresh]);
-
+  useEffect(() => {
+    if (!tabId || !currentProject || !recognized || editing || queueTarget || busy) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshFiles(tabId, currentProject).catch(e => setError(String(e)));
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [tabId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !currentProject) return;
     setBusy(true); setError(''); setNotice('');
@@ -106,7 +136,8 @@ function App() {
     await writeProjectJson(tabId, currentProject.workspaceRoot, 'tasks.json', next);
     setNotice('Saved to .t3/tasks.json');
   }
-  function edit(task?: Task) { setEditing(task || blank()); setDraft(task ? structuredClone(task) : blank()); setSchedule(''); setWorktree(''); }
+  function edit(task?: Task) { const value = task ? structuredClone(task) : blank(); setEditing(value); setDraft(value); }
+  function requestExecution(task: Task) { setSchedule(''); setWorktree(''); setQueueTarget(task); }
   async function saveTask() {
     if (!draft.title.trim() || !draft.prompt.trim()) throw new Error('Title and prompt are required');
     const original = tasks.tasks.find(t => t.id === draft.id);
