@@ -47,7 +47,7 @@ export async function startDetached(home = defaultHome()) {
   const file = await fs.open(path.join(home, 'runner.log'), 'a', 0o600);
   try {
     const cli = path.resolve(import.meta.dirname, 'cli.ts');
-    const child = spawn(process.execPath, ['--experimental-strip-types', cli, 'run'], { detached: true,
+    const child = spawn(process.execPath, ['--experimental-strip-types', cli, 'run'], { detached: true, windowsHide: true,
       env: { ...process.env, T3_COMPANION_HOME: home }, stdio: ['ignore', file.fd, file.fd] });
     child.unref(); return child.pid;
   } finally { await file.close(); }
