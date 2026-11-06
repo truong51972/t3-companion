@@ -177,54 +177,138 @@ function App() {
     setNotice(`Runner command: ${verb}`);
   }
   return <main className="stack sidepanel">
-    <header className="panel stack header"><div className="row"><div><h1>T3 Companion</h1><p className="caption">Project dashboard</p></div><span className={`tag ${recognized ? 'ok' : 'warn'}`}>{recognized ? 'T3 detected' : 'Disconnected'}</span></div>
-      <div className="caption small-url" title={tabUrl}>{tabUrl}</div>
-      <div className="row"><label className="muted" htmlFor="project">Project</label><button disabled={busy} onClick={() => void refresh()}>Refresh</button></div>
-      <select id="project" value={projectId} disabled={busy || projects.length === 0} onChange={e => setProjectId(e.target.value)}>
-        {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title} · {project.workspaceRoot}</option>) : <option value="">No project</option>}
-      </select></header>
-    <nav className="nav" aria-label="Dashboard sections">{(['kanban','sessions','runner'] as Page[]).map(p => <button key={p} className={p === page ? 'selected':''} onClick={() => setPage(p)}>{p === 'kanban' ? 'Kanban' : p === 'sessions' ? 'Sessions' : 'Runner'}</button>)}</nav>
+    <header className="header">
+      <div className="row">
+        <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
+        <div className="header-actions">
+          <span className={'connection ' + (recognized ? 'connected' : 'disconnected')}><span className="status-dot"/>{recognized ? 'Connected' : 'Offline'}</span>
+          <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh" disabled={busy} onClick={() => void refresh()}>↻</button>
+        </div>
+      </div>
+      <div className="project-row">
+        <label className="sr-only" htmlFor="project">Project</label>
+        <select id="project" aria-label="Project" value={projectId} disabled={busy || projects.length === 0}
+          onChange={e => { manualProject.current = true; setProjectId(e.target.value); }}>
+          {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>) : <option value="">No project</option>}
+        </select>
+        <span className="project-path" title={currentProject?.workspaceRoot || tabUrl}>{currentProject?.workspaceRoot || tabUrl}</span>
+      </div>
+    </header>
+    <nav className="nav" aria-label="Dashboard sections">{(['kanban','sessions','runner'] as Page[]).map(p =>
+      <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined} onClick={() => setPage(p)}>
+        {p === 'kanban' ? 'Board' : p === 'sessions' ? 'Sessions' : 'Runner'}
+      </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
-    {notice && <p className="notice">{notice}</p>}
-    {!recognized ? <section className="panel stack"><p>Open T3 Code on localhost or your Cloudflare domain, then click the extension icon to verify its DOM.</p><button onClick={() => void refresh()}>Retry detection</button></section>
-      : !currentProject || tabId === null ? <p className="notice">No project found on the connected T3 environment.</p>
-      : page === 'kanban' ? <section className="stack"><div className="row"><h2>Kanban</h2><button disabled={busy} onClick={() => edit()}>+ New task</button></div>
-        <p className="caption">Task status is independent from agent execution status.</p>
-        {editing && <div className="panel stack task-editor">
-          <h3>{tasks.tasks.some(t => t.id === editing.id) ? 'Edit task' : 'New task'}</h3>
-          <label>Title<input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
-          <label>Description<textarea rows={2} value={draft.description || ''} onChange={e => setDraft({ ...draft, description: e.target.value })}/></label>
-          <label>Agent prompt<textarea rows={4} value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })}/></label>
-          <div className="row"><label>Priority<select value={draft.priority ?? 2} onChange={e => setDraft({ ...draft, priority: Number(e.target.value) })}><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></label>
-            <label>Status<select value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value as Status })}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label></div>
-          <div className="buttons"><button disabled={busy} className="primary" onClick={() => void action(saveTask)}>Save</button><button onClick={() => setEditing(null)}>Cancel</button></div></div>}
-        <div className="board">{columns.map(column => <div className="lane" key={column.key}>
-          <div className="row"><strong>{column.name}</strong><span className="tag">{tasks.tasks.filter(t => t.status === column.key).length}</span></div>
-          {tasks.tasks.filter(t => t.status === column.key).sort((a,b) => (a.priority || 2) - (b.priority || 2)).map(task =>
-            <article className="task-card stack" key={task.id}><div className="row"><strong>{task.title}</strong><span className="caption">P{task.priority || 2}</span></div>
-              {task.description && <p className="caption">{task.description}</p>}
-              {taskExecution(task) && <p className="caption">Execution: <strong>{taskExecution(task)?.status}</strong>{taskExecution(task)?.threadId && <span> · {taskExecution(task)?.threadId}</span>}</p>}
-              <div className="row"><select aria-label={`Move ${task.title}`} value={task.status} onChange={e => void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status: e.target.value as Status } : t) }), task))}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select>
-                <button onClick={() => edit(task)}>Edit</button><button onClick={() => { if (window.confirm('Delete this task?')) void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }), task)); }}>Delete</button></div>
-              <div className="buttons"><button disabled={busy} onClick={() => void action(async () => enqueue(task))}>Queue execution</button></div>
-            </article>)}
-        </div>)}</div>
-        <div className="panel stack"><h3>Next execution request</h3><label>Not before (optional)<input type="datetime-local" value={schedule} onChange={e => setSchedule(e.target.value)}/></label>
-          <label>T3 worktree base ref (optional)<input placeholder="main" value={worktree} onChange={e => setWorktree(e.target.value)}/></label>
-          <p className="caption">These values apply when pressing Queue execution on a task.</p></div>
-      </section>
-      : page === 'sessions' ? <section className="stack"><h2>T3 sessions</h2><div className="panel stack">
-          <label>Choose thread<select value={selectedThread} onChange={e => setSelectedThread(e.target.value)}><option value="">New session</option>{visibleThreads.map(t => <option key={t.id} value={t.id}>{t.title} · {t.status}</option>)}</select></label>
-          <label>Message<textarea rows={4} value={sessionPrompt} onChange={e => setSessionPrompt(e.target.value)} placeholder="Describe work for T3 agent..."/></label>
-          <div className="buttons"><button className="primary" disabled={busy || !sessionPrompt.trim()} onClick={() => void action(newThread)}>New session</button><button disabled={busy || !selectedThread || !sessionPrompt.trim()} onClick={() => void action(messageThread)}>Send to selected</button></div></div>
-        {visibleThreads.map(t => <article key={t.id} className="task-card"><div className="row"><strong>{t.title}</strong><span className="tag">{t.status}</span></div><p className="caption">{t.id}</p><button onClick={() => setSelectedThread(t.id)}>Select thread</button></article>)}
-      </section>
-      : <section className="stack"><h2>Runner</h2><p className="caption">Commands execute through T3 Terminal RPC. The Runner keeps running when the browser closes.</p>
-        <div className="panel stack"><div className="buttons">{(['status','start','stop','add','remove'] as const).map(verb => <button disabled={busy} key={verb} onClick={() => void action(async () => manageRunner(verb))}>{verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase()+verb.slice(1)}</button>)}</div>
-          <pre className="runner-result">{runnerResult}</pre>
-          {!visibleThreads.length && <p className="notice">At least one T3 session in the selected project is needed as the temporary terminal host.</p>}
-        </div></section>}
-    <footer className="caption">Management UI · T3 authenticated RPC · file-based Runner</footer>
+    {notice && <p className="notice success" role="status">{notice}</p>}
+    {!recognized ? <section className="empty-view">
+      <h2>Connect to T3 Code</h2>
+      <p className="muted">Open a T3 Code tab, then check the connection.</p>
+      <button onClick={() => void refresh()}>Retry detection</button>
+    </section>
+    : !currentProject || tabId === null ? <section className="empty-view"><p>No projects found in this T3 environment.</p></section>
+    : page === 'kanban' ? <section className="kanban-view">
+      <div className="view-header">
+        <div className="view-title"><h2>Board</h2><span className="muted">{tasks.tasks.length} {tasks.tasks.length === 1 ? 'task' : 'tasks'}</span></div>
+        <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+      </div>
+      <div className="board-scroll">
+        <div className="board">{columns.map(column => {
+          const laneTasks = tasks.tasks.filter(t => t.status === column.key).sort((a,b) => (a.priority || 2) - (b.priority || 2));
+          return <div className="lane" key={column.key}>
+            <div className="lane-heading"><div className="lane-title"><span className={'lane-icon ' + column.key}/><strong>{column.name}</strong></div><span className="lane-count">{laneTasks.length}</span></div>
+            <div className="lane-body">
+              {laneTasks.length === 0 && <p className="lane-empty">No tasks</p>}
+              {laneTasks.map(task => {
+                const execution = taskExecution(task);
+                const queued = task.executionRequests?.length && !execution;
+                return <article className="task-card" key={task.id}>
+                  <div className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</div>
+                  {task.description && <p className="task-description">{task.description}</p>}
+                  <div className="task-meta">
+                    <span className="priority-label">P{task.priority || 2}</span>
+                    {(execution || queued) && <span className={'execution-status ' + (execution?.status || 'queued')}>{execution?.status?.replaceAll('_', ' ') || 'queued'}</span>}
+                  </div>
+                  <div className="task-footer">
+                    <button className="queue-button" disabled={busy} onClick={() => requestExecution(task)}>Queue</button>
+                    <details className="task-more">
+                      <summary aria-label={'More actions for ' + task.title} title="More actions">•••</summary>
+                      <div className="task-menu">
+                        <label>Move to<select aria-label={'Move ' + task.title} value={task.status}
+                          onChange={e => void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status: e.target.value as Status } : t) }), task))}>
+                          {columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        </select></label>
+                        <div className="menu-actions">
+                          <button onClick={() => edit(task)}>Edit</button>
+                          <button className="danger" onClick={() => { if (window.confirm('Delete this task?')) void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }), task)); }}>Delete</button>
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                </article>;
+              })}
+            </div>
+          </div>;
+        })}</div>
+      </div>
+    </section>
+    : page === 'sessions' ? <section className="sessions-view">
+      <div className="view-header"><div className="view-title"><h2>Sessions</h2><span className="muted">{visibleThreads.length} threads</span></div></div>
+      <div className="sessions-layout">
+        <div className="session-list">
+          {visibleThreads.length === 0 && <p className="muted empty-hint">No sessions in this project.</p>}
+          {visibleThreads.map(t => <button className={'session-item ' + (selectedThread === t.id ? 'active' : '')} key={t.id} onClick={() => setSelectedThread(t.id)}>
+            <span className="session-name">{t.title}</span><span className="session-status">{t.status}</span>
+          </button>)}
+        </div>
+        <div className="session-compose">
+          <label htmlFor="thread-select">Send to</label>
+          <select id="thread-select" value={selectedThread} onChange={e => setSelectedThread(e.target.value)}>
+            <option value="">New session</option>{visibleThreads.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+          <label htmlFor="session-message">Message</label>
+          <textarea id="session-message" rows={5} value={sessionPrompt} onChange={e => setSessionPrompt(e.target.value)} placeholder="Describe the work for the agent"/>
+          <div className="form-actions"><button className="primary" disabled={busy || !sessionPrompt.trim()} onClick={() => void action(newThread)}>New session</button>
+            <button disabled={busy || !selectedThread || !sessionPrompt.trim()} onClick={() => void action(messageThread)}>Send message</button></div>
+        </div>
+      </div>
+    </section>
+    : <section className="runner-view">
+      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className="muted">Local service</span></div></div>
+      <div className="runner-section">
+        <p className="muted">Commands use the selected T3 environment. The service runs independently of the browser.</p>
+        <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
+          <button disabled={busy || !visibleThreads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
+            {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
+          </button>)}</div>
+        {!visibleThreads.length && <p className="muted">Create a T3 session in this project to enable terminal commands.</p>}
+        <details className="runner-output"><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
+      </div>
+    </section>}
+    <dialog ref={editorDialog} className="modal" onClose={() => setEditing(null)}>
+      <div className="modal-heading"><h2>{editing && tasks.tasks.some(t => t.id === editing.id) ? 'Edit task' : 'New task'}</h2>
+        <button type="button" className="icon-button" aria-label="Close task editor" onClick={() => setEditing(null)}>×</button></div>
+      <div className="modal-content">
+        <label>Title<input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })}/></label>
+        <label>Description<textarea rows={2} value={draft.description || ''} onChange={e => setDraft({ ...draft, description: e.target.value })}/></label>
+        <label>Agent prompt<textarea rows={6} value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })}/></label>
+        <div className="field-pair">
+          <label>Priority<select value={draft.priority ?? 2} onChange={e => setDraft({ ...draft, priority: Number(e.target.value) })}><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></label>
+          <label>Status<select value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value as Status })}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label>
+        </div>
+      </div>
+      <div className="modal-actions"><button onClick={() => setEditing(null)}>Cancel</button>
+        <button className="primary" disabled={busy || !draft.title.trim() || !draft.prompt.trim()} onClick={() => void action(saveTask)}>Save task</button></div>
+    </dialog>
+    <dialog ref={queueDialog} className="modal" onClose={() => setQueueTarget(null)}>
+      <div className="modal-heading"><div><h2>Queue execution</h2><p className="muted">{queueTarget?.title}</p></div>
+        <button type="button" className="icon-button" aria-label="Close execution dialog" onClick={() => setQueueTarget(null)}>×</button></div>
+      <div className="modal-content">
+        <label>Not before (optional)<input type="datetime-local" value={schedule} onChange={e => setSchedule(e.target.value)}/></label>
+        <label>Worktree base ref (optional)<input placeholder="main" value={worktree} onChange={e => setWorktree(e.target.value)}/></label>
+      </div>
+      <div className="modal-actions"><button onClick={() => setQueueTarget(null)}>Cancel</button>
+        <button className="primary" disabled={busy || !queueTarget} onClick={() => void action(async () => { if (queueTarget) { await enqueue(queueTarget); setQueueTarget(null); } })}>Queue request</button></div>
+    </dialog>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<App />);
