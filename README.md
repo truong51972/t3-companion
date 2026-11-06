@@ -24,7 +24,9 @@ npm run build:extension
 
 Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select **`extension/dist/`** (not the source `extension/`). Reload the extension after every rebuild. Open T3 Web (localhost or custom Cloudflare domain) and click the Companion icon. After DOM verification, open the Side Panel.
 
-In the Side Panel choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, manage T3 sessions and control the installed Runner. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+In the Side Panel choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+
+**Link routing limitation:** Companion only constructs a thread route when the current T3 tab is already on a recognized `/<environmentId>/<threadId>` route. It does not guess the environment from the project, read T3 frontend state, or navigate to a different T3 environment. If the T3 tab is on its home/draft route, open any existing thread there first, then return to the task. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
 ### Install and start Runner on the **T3 environment host**
 
@@ -52,8 +54,8 @@ The runner is a detached Node process; it continues after browser/Side Panel clo
 4. Create a task with title/description/prompt/priority; refresh; verify it persisted in `.t3/tasks.json`.
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
-7. From Sessions, start a T3 session (project default model required), then select it and send another prompt. Verify in T3's own session UI.
-8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread in that project and `t3-runner` available on the host.
+7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, open an existing T3 thread first, then click the task: the existing T3 tab should navigate to the linked thread. Verify an older execution is available from Task Details.
+8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread in that project, opened through T3 Code itself, and `t3-runner` available on the host.
 9. Close browser; confirm `t3-runner status` on WSL still reports running, and the Runner continues dispatch.
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
