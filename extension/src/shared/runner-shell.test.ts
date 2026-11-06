@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readableTerminalText, runnerShellCommand, terminalSubmit, CONTROL_SOURCE_REF, RUNNER_SOURCE_REF } from './runner-shell.ts';
@@ -49,6 +49,39 @@ test('one-time installer fetches a fixed commit, not a moving branch', () => {
   assert.match(RUNNER_SOURCE_REF, /^[a-f0-9]{40}$/);
   assert.ok(command.includes('runner-control.cjs'));
   assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64/);
+});
+
+test('legacy Runner is detected as installed but requiring one-time control setup', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-'));
+  try {
+    const entry = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
+    mkdirSync(path.dirname(entry), { recursive: true });
+    writeFileSync(entry, '');
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', script, '--', 'status', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /"installed":true/);
+    assert.match(child.stdout, /"bridgeMissing":true/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('one-time bootstrap writes and invokes a fixed adapter without eval or external network in test', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-bootstrap-'));
+  try {
+    const command = runnerShellCommand('install', undefined, MARKER);
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    const adapter = "console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:true}));console.log(process.argv[2]+':0')";
+    const mockedFetch = 'global.fetch=async()=>({ok:true,text:async()=>'+JSON.stringify(adapter)+'});';
+    const child = spawnSync(process.execPath, ['-e', mockedFetch + script, '--', 'install', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 15000,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.ok(child.stdout.includes(MARKER + ':0'));
+    assert.ok(existsSync(path.join(home, '.t3', 'companion', 'runner-control.cjs')));
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test('invalid marker is rejected', () => {
