@@ -86,9 +86,50 @@ const marker = __MARKER__;
 });
 `;
 
+// Keep the 15s heartbeat short: do not paste the full installer into PowerShell every poll.
+const CONTROL_PROGRAM = String.raw`
+const request = __REQUEST__, marker = __MARKER__;
+(async () => {
+  const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+  const cp = require('node:child_process'), home = path.join(os.homedir(), '.t3', 'companion', 'runner');
+  const entry = path.join(home, 'bin', 't3-runner.mjs');
+  const files = [entry, ...['cli.ts', 'runner.ts', 'storage.ts'].map(f => path.join(home, 'src', f))];
+  if (!files.every(fs.existsSync)) return { installed: false, running: false, pid: null };
+  const run = (verb, arg) => {
+    const result = cp.spawnSync(process.execPath, [entry, verb, ...(arg ? [arg] : [])], { encoding: 'utf8', timeout: 10000, windowsHide: true });
+    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || result.stdout || 'Runner CLI failed');
+    return JSON.parse(result.stdout.trim());
+  };
+  if (request.verb === 'start') {
+    if (!run('status').running) run('start');
+    for (let i = 0; i < 10; i++) {
+      const current = run('status');
+      if (current.running) return { ...current, installed: true };
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error('Runner did not become ready');
+  }
+  if (request.verb === 'stop') {
+    const stopped = run('stop');
+    return { ...run('status'), installed: true, stopRequested: stopped.requested };
+  }
+  if (request.verb === 'add' || request.verb === 'remove') {
+    if (!request.target) throw new Error('Project path required');
+    const projects = run(request.verb, request.target);
+    return { ...run('status'), installed: true, projects };
+  }
+  return { ...run('status'), installed: true };
+})().then(value => {
+  process.stdout.write('T3_COMPANION_RESULT:' + JSON.stringify(value) + '\n' + marker + ':0\n');
+}).catch(error => {
+  process.stdout.write('T3_COMPANION_ERROR:' + String(error.message || error) + '\n' + marker + ':1\n');
+  process.exitCode = 1;
+});
+`;
+
 export function runnerShellCommand(verb: RunnerVerb, target: string | undefined, marker: string): string {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
-  const payload = PROGRAM
+  const payload = (verb === 'install' ? PROGRAM : CONTROL_PROGRAM)
     .replace('__REQUEST__', JSON.stringify({ verb, target, ref: RUNNER_SOURCE_REF }))
     .replace('__MARKER__', JSON.stringify(marker));
   const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(payload)));
