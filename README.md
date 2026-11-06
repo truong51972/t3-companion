@@ -11,7 +11,9 @@
 | P2 — Project `.t3/tasks.json` Kanban CRUD, scheduling and `runtime.json` display | Implemented; concurrent panel write limitation below |
 | P3 — Runner registry, 10s polling, T3 CLI dispatch, 3 worker limit, crash recovery | Implemented; Node tests passing |
 | P4 — Runner CLI management via T3 Terminal RPC | Implemented; live integration test required |
-| P5 — Releases checker and offline/manual setup | Implemented; multi-environment T3 Connect bridge not yet available |
+| P5 — Releases checker and offline/manual setup | Implemented |
+| P6 — Multi-environment direct hosts | Implemented: explicit host selector, descriptor validation, isolation guards; live multi-host test required |
+| P7 — Hosted T3 Connect registry integration | Blocked on an upstream public integration API; credentials are not scraped |
 
 ### Install extension
 
@@ -24,9 +26,11 @@ npm run build:extension
 
 Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select **`extension/dist/`** (not the source `extension/`). Reload the extension after every rebuild. Open T3 Web (localhost or custom Cloudflare domain) and click the Companion icon. After DOM verification, open the Side Panel.
 
-In the Side Panel choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+In the Side Panel, **Environment → Follow active T3 tab** automatically tracks the direct environment serving the active tab. For another T3 host already open in the browser, select its tab and grant permission to that specific host (you may need to click the Companion icon once on a custom domain for initial verification). Its descriptor is verified independently; project data and Runner controls are scoped to that host. [Architecture and acceptance matrix](docs/multi-environment.md).
 
-**Link routing limitation:** Companion only constructs a thread route when the current T3 tab is already on a recognized `/<environmentId>/<threadId>` route. It does not guess the environment from the project, read T3 frontend state, or navigate to a different T3 environment. If the T3 tab is on its home/draft route, open any existing thread there first, then return to the task. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
+Choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+
+**Link routing:** Companion uses the T3 environment ID verified by the selected host's public descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
 ### Quick setup Runner on the **T3 environment host** (WSL / Linux)
 
@@ -60,12 +64,14 @@ Runner is detached and remains active after closing the browser/Side Panel, but 
 4. Create a task with title/description/prompt/priority; refresh; verify it persisted in `.t3/tasks.json`.
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
-7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, open an existing T3 thread first, then click the task: the existing T3 tab should navigate to the linked thread. Verify an older execution is available from Task Details.
+7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, click it even from the host's home page: the selected verified T3 tab should navigate to the linked environment/thread route. Verify an older execution is available from Task Details.
 8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread in that project, opened through T3 Code itself, and `t3-runner` available on the host.
 9. Close browser; confirm `t3-runner status` on WSL still reports running, and the Runner continues dispatch.
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
-12. Test with T3 Connect separately; report results. The direct cookie bridge does **not** implement multiplexing to other environments from `app.t3.codes`.
+12. Open two direct T3 hosts in distinct tabs; select each and grant scoped host permission. Verify disjoint projects/tasks/Runner status and correct linked-thread navigation; changes on the non-selected host must never mutate the selected host.
+13. In a direct host's T3 Web, navigate to a different remote environment thread: Companion should block RPC rather than use the host's data.
+14. On `app.t3.codes` with T3 Connect, check for the explicit upstream-integration-required message. T3 Connect multiplexing remains unsupported; do not report it as a successful remote RPC test.
 
 ### Safety and current limits
 
@@ -73,5 +79,6 @@ Runner is detached and remains active after closing the browser/Side Panel, but 
 - No access to T3 client React/Zustand state, no cookie/token scraping, no Companion REST API.
 - Runner persists `dispatching` before launching the agent and does not retry ambiguous launch results automatically.
 - `projects.writeFile` in upstream T3 is **not atomic** and offers no CAS operation. Companion checks the latest task before saving, but editing one project in simultaneous Side Panels is unsafe. See [bridge notes](extension/src/bridge/README.md).
-- A direct T3 Web server behind Cloudflare can use the browser cookie bridge. A hosted T3 Connect client controlling arbitrary remote environments may require its own supported integration; that portion is not complete.
+- Every request binds to a server-verified environment ID using `/.well-known/t3/environment`. Localhost, Cloudflare direct hosts, and separately authenticated remote direct hosts can be managed as distinct environments.
+- Hosted T3 Connect client-runtime sessions cannot be reused without an upstream integration contract. See [multi-environment decision](docs/multi-environment.md); no browser credential extraction or independent DPoP implementation is attempted.
 - This is a beta implementation; live T3 integration and Edge/Chrome tests are to be performed on the user's host. Run local checks with `npm test`, `npm run typecheck:extension`, `npm run build:extension`.
