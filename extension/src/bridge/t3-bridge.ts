@@ -38,7 +38,8 @@ export async function detectTab(tab: chrome.tabs.Tab): Promise<boolean> {
     const detected = looksLikeT3(result?.result || { root: false, icon: false, manifest: false, splash: false, composer: false, title: false });
     if (detected && tab.url) {
       const origin = new URL(tab.url).origin;
-      const { verifiedOrigins = [] } = await chrome.storage.local.get('verifiedOrigins');
+      const stored = await chrome.storage.local.get('verifiedOrigins');
+      const verifiedOrigins = Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins.filter((value): value is string => typeof value === 'string') : [];
       if (!verifiedOrigins.includes(origin)) await chrome.storage.local.set({ verifiedOrigins: [...verifiedOrigins, origin] });
     }
     return detected;
