@@ -105,3 +105,10 @@ button.compact{padding:6px 10px}
 .request-info span{font-size:11px;overflow-wrap:anywhere}
 .request-row button{flex-shrink:0}
 .request-error{color:#d7a39c}
+
+/* Explicit environment scope, separate from the per-environment project selector. */
+.environment-row{display:flex;align-items:center;gap:9px;min-width:0;padding-top:9px}
+.environment-row label{display:block;font-size:11px;color:#9ea0a6;flex-shrink:0}
+.environment-row select{width:min(60%,300px);padding:5px 8px;font-size:11px}
+.environment-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#8eac96}
+@media(max-width:700px){.environment-row{flex-wrap:wrap}.environment-row select{flex:1;width:auto;min-width:145px}}
