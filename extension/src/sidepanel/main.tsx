@@ -60,6 +60,7 @@ function App() {
   const editorDialog = useRef<HTMLDialogElement>(null);
   const queueDialog = useRef<HTMLDialogElement>(null);
   const detailsDialog = useRef<HTMLDialogElement>(null);
+  const runnerProjectsMenu = useRef<HTMLDetailsElement>(null);
   const filesVersion = useRef(0);
   const shellVersion = useRef(0);
   const manualProject = useRef(false);
@@ -85,6 +86,25 @@ function App() {
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
+  useEffect(() => {
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const menu = runnerProjectsMenu.current;
+      if (menu?.open && !event.composedPath().includes(menu)) menu.open = false;
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      const menu = runnerProjectsMenu.current;
+      if (event.key !== 'Escape' || !menu?.open) return;
+      menu.open = false;
+      menu.querySelector('summary')?.focus();
+      event.preventDefault();
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
 
   const refreshShell = useCallback(async (id: number, url: string, environmentId: string) => {
     const version = ++shellVersion.current;
@@ -458,7 +478,7 @@ function App() {
             disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
           {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
-          {runnerInstalled === 'true' && <details className="runner-more">
+          {runnerInstalled === 'true' && <details ref={runnerProjectsMenu} className="runner-more">
             <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
             <div className="runner-menu">
               <button disabled={busy || !runnerHostAvailable} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void action(async () => manageRunner('add')); }}>Register current project</button>
