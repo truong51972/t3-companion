@@ -20,8 +20,8 @@ test('uses only Node and no POSIX or PowerShell-specific syntax', () => {
   const payload = decode(command);
   assert.match(payload, /node:child_process/);
   assert.match(payload, /T3_COMPANION_RESULT/);
-  assert.match(payload, /runner\/bin\/t3-runner.mjs/);
-  assert.match(payload, new RegExp(RUNNER_SOURCE_REF));
+  assert.match(payload, /t3-runner\.mjs/);
+  assert.doesNotMatch(payload, /raw\.githubusercontent\.com/, 'polling must not embed bootstrap downloader');
 });
 
 test('quotes hostile project names as JSON inside the encoded payload', () => {
@@ -79,7 +79,7 @@ test('portable runner command executes through the actual shell', () => {
       : spawnSync('sh', ['-c', command], {
           env: { ...process.env, HOME: temp }, encoding: 'utf8', timeout: 15000,
         });
-    assert.equal(child.status, 0, child.error?.message || child.stderr || child.stdout);
+    assert.equal(child.status, 0, [child.error?.message, child.stderr, child.stdout].filter(Boolean).join('\n'));
     const line = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
     assert.ok(line, child.stdout);
     assert.equal(JSON.parse(line[1]).installed, false);
