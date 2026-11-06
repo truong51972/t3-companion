@@ -13,7 +13,7 @@
 | P4 — Runner CLI management via T3 Terminal RPC | Implemented; live integration test required |
 | P5 — Releases checker and offline/manual setup | Implemented |
 | P6 — Multi-environment direct hosts | Implemented: explicit host selector, descriptor validation, isolation guards; live multi-host test required |
-| P7 — Hosted T3 Connect registry integration | Blocked on an upstream public integration API; credentials are not scraped |
+| P7 — Hosted T3 Web session authorization | Experimental session adapter implemented; **real Chrome/Edge T3 Connect testing remains unverified** |
 
 ### Install extension
 
@@ -26,11 +26,11 @@ npm run build:extension
 
 Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select **`extension/dist/`** (not the source `extension/`). Reload the extension after every rebuild. Open T3 Web (localhost or custom Cloudflare domain) and click the Companion icon. After DOM verification, open the Side Panel.
 
-In the Side Panel, **Environment → Follow active T3 tab** automatically tracks the direct environment serving the active tab. For another T3 host already open in the browser, select its tab and grant permission to that specific host (you may need to click the Companion icon once on a custom domain for initial verification). Its descriptor is verified independently; project data and Runner controls are scoped to that host. [Architecture and acceptance matrix](docs/multi-environment.md).
+In the Side Panel, **T3 tab → Follow active T3 tab** and **Environment → Follow T3 thread** track the current browser tab and its selected environment. For another T3 host already open in the browser, select its tab and grant permission to that specific host (you may need to click the Companion icon once on a custom domain for initial verification). The separate Environment selector also lists environments saved in that tab's existing T3 Web session. Each remote descriptor is verified independently; project data and Runner controls are scoped to the selected environment. [Architecture and acceptance matrix](docs/multi-environment.md).
 
 Choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
 
-**Link routing:** Companion uses the T3 environment ID verified by the selected host's public descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
+**Link routing:** Companion selects the environment from the active T3 Web session and verifies its actual target server descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
 ### Quick setup Runner on the **T3 environment host** (WSL / Linux)
 
@@ -70,15 +70,15 @@ Runner is detached and remains active after closing the browser/Side Panel, but 
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
 12. Open two direct T3 hosts in distinct tabs; select each and grant scoped host permission. Verify disjoint projects/tasks/Runner status and correct linked-thread navigation; changes on the non-selected host must never mutate the selected host.
-13. In a direct host's T3 Web, navigate to a different remote environment thread: Companion should block RPC rather than use the host's data.
-14. On `app.t3.codes` with T3 Connect, check for the explicit upstream-integration-required message. T3 Connect multiplexing remains unsupported; do not report it as a successful remote RPC test.
+13. In `app.t3.codes`, open a remote T3 Connect thread and verify its shell, tasks, Runner, and linked navigation. Repeat with a second remote environment via the selector.
+14. Check expired session credentials and mismatched remote descriptors. Companion must fail without falling back to the tab host; CI cannot verify authenticated browser scenarios.
 
 ### Safety and current limits
 
 - DOM fingerprinting is read-only *detection*, **not authentication**. Every RPC request is authorized independently by T3 Code's existing session and permission system.
-- No access to T3 client React/Zustand state, no cookie/token scraping, no Companion REST API.
+- No access to private React/Zustand state or Companion REST API. The page-context adapter reads existing browser session authorization, but never returns credentials or stores them in the extension or Runner.
 - Runner persists `dispatching` before launching the agent and does not retry ambiguous launch results automatically.
 - `projects.writeFile` in upstream T3 is **not atomic** and offers no CAS operation. Companion checks the latest task before saving, but editing one project in simultaneous Side Panels is unsafe. See [bridge notes](extension/src/bridge/README.md).
-- Every request binds to a server-verified environment ID using `/.well-known/t3/environment`. Localhost, Cloudflare direct hosts, and separately authenticated remote direct hosts can be managed as distinct environments.
-- Hosted T3 Connect client-runtime sessions cannot be reused without an upstream integration contract. See [multi-environment decision](docs/multi-environment.md); no browser credential extraction or independent DPoP implementation is attempted.
+- Every request binds to the selected session environment and checks the actual target's `/.well-known/t3/environment` descriptor before sending credentials.
+- Hosted T3 Connect saved authorization is reused via an internal IndexedDB/DPoP compatibility adapter, not T3's live WebSocket connection. T3 Web remains responsible for token refresh. See [multi-environment decision](docs/multi-environment.md).
 - This is a beta implementation; live T3 integration and Edge/Chrome tests are to be performed on the user's host. Run local checks with `npm test`, `npm run typecheck:extension`, `npm run build:extension`.
