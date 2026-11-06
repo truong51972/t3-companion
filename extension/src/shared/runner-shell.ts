@@ -23,6 +23,10 @@ const CONTROL_SCRIPT = PATH_SCRIPT +
   "}else{console.log('T3_COMPANION_ERROR:Runner controls require setup');" +
   "console.log(process.argv[2]+':1');process.exitCode=1}";
 
+const DIRECT_SCRIPT = PATH_SCRIPT +
+  "try{require(s)}catch(e){console.log('T3_COMPANION_ERROR:'+String(e.message||e).slice(-500));" +
+  "console.log(process.argv[2]+':1');process.exitCode=1}";
+
 const INSTALL_SCRIPT = PATH_SCRIPT +
   "fetch('" + CONTROL_URL + "',{signal:AbortSignal.timeout(15000)})" +
   ".then(r=>{if(!r.ok)throw Error('Control download failed: HTTP '+r.status);return r.text()})" +
@@ -39,7 +43,7 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
   if ((verb === 'add' || verb === 'remove') && !target) throw new Error('Project path required');
   const args = [verb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
-  return 'node -e "' + (verb === 'install' ? INSTALL_SCRIPT : CONTROL_SCRIPT) + '" -- ' + args.join(' ');
+  return 'node -e "' + (verb === 'install' ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
 }
 
 /** A PTY Enter key sends CR; LF is Ctrl+J in terminal raw mode (not Enter on PowerShell). */
