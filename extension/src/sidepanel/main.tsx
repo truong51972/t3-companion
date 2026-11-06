@@ -164,6 +164,14 @@ function App() {
       const verified = new Set(Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : []);
       const eligible = tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
         (isT3Web(t.url) || verified.has(new URL(t.url).origin)));
+      // Edge may recreate the tab-scoped Side Panel. Restore the last connected
+      // T3 session from ephemeral browser storage when this panel remounts.
+      const windowId = tabs[0]?.windowId;
+      if (selectedTabRef.current === null && windowId !== undefined) {
+        const storageKey = 'lastT3Tab:' + windowId;
+        const saved = await chrome.storage.session.get(storageKey);
+        if (Number.isInteger(saved[storageKey])) selectedTabRef.current = saved[storageKey] as number;
+      }
       setTabChoices(eligible);
       // Prefer an active T3 tab, but keep the last selected T3 tab while browsing
       // unrelated pages. Manual tab selection always takes precedence.
@@ -185,6 +193,9 @@ function App() {
         setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
       }
       selectedTabRef.current = tab.id;
+      if (tab.windowId !== undefined) {
+        void chrome.storage.session.set({ ['lastT3Tab:' + tab.windowId]: tab.id });
+      }
       setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
       setEnvironmentLabel(descriptor.label); setRecognized(true);
       await refreshShell(tab.id, tab.url, descriptor.environmentId);
