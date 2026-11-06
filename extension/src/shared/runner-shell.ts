@@ -11,10 +11,9 @@ export function runnerShellCommand(verb: RunnerVerb, target?: string): string {
   // The user-level clone takes precedence, but existing global installs still work.
   // Never put an untrusted project path into a shell command without quoting it.
   return [
-    \`if [ -f "\${runnerScript}" ]; then node "\${runnerScript}" \${args}\`,
-    \`elif command -v t3-runner >/dev/null 2>&1; then t3-runner \${args}\`,
+    'if [ -f "' + runnerScript + '" ]; then node "' + runnerScript + '" ' + args,
+    'elif command -v t3-runner >/dev/null 2>&1; then t3-runner ' + args,
     "else printf '%s\\n' 'T3_COMPANION_RUNNER_NOT_INSTALLED'; (exit 127)",
-    'fi',
   ].join('; ');
 }
 
