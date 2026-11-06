@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, describeEnvironment, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { activeTab, describeEnvironment, installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
 import { isSafeOrigin, isT3Web } from '../shared/t3-site';
 import { environmentThreadUrl } from '../shared/environment-routing';
 import type { Project, Thread } from '../bridge/t3-bridge';
@@ -13,7 +13,7 @@ type Task = { id: string; title: string; description?: string; prompt: string; s
   executionRequests?: { requestId: string; notBefore?: string; worktree?: string }[] };
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
-type Page = 'kanban' | 'runner';
+type Page = 'kanban' | 'overview';
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Review' }, { key: 'done', name: 'Done' },
@@ -68,6 +68,9 @@ function App() {
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
   const [runnerResult, setRunnerResult] = useState('Not checked');
+  const [skillState, setSkillState] = useState<'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error'>('checking');
+  const [skillBusy, setSkillBusy] = useState(false);
+  const [skillError, setSkillError] = useState('');
   const [runnerAutoStart, setRunnerAutoStart] = useState(true);
   const runnerAutoStartRef = useRef(true);
   const runnerActionInFlight = useRef(false);
@@ -250,6 +253,28 @@ function App() {
     return () => { active = false; clearInterval(timer); };
   }, [tabId, environmentId, recognized, threads, projects]);
 
+  // Skill checks are read-only project RPC calls; avoid extra terminal history.
+  useEffect(() => {
+    if (page !== 'overview') return;
+    if (!tabId || !environmentId || !currentProject || !recognized) {
+      setSkillState('unavailable');
+      return;
+    }
+    let active = true;
+    const key = scopedKey.current;
+    setSkillState('checking'); setSkillError('');
+    void isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot)
+      .then(installed => {
+        if (active && scopedKey.current === key) setSkillState(installed ? 'installed' : 'not_installed');
+      })
+      .catch(error => {
+        if (active && scopedKey.current === key) {
+          setSkillState('error'); setSkillError(String(error));
+        }
+      });
+    return () => { active = false; };
+  }, [page, tabId, environmentId, currentProject, recognized]);
+
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
@@ -347,6 +372,32 @@ function App() {
       runnerActionInFlight.current = false;
     }
   }
+  async function manageSkill(verb: 'status' | 'install') {
+    if (!tabId || !environmentId || !currentProject) return;
+    const key = scopedKey.current;
+    setSkillBusy(true); setSkillError('');
+    try {
+      if (verb === 'install') {
+        const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
+        const hostProject = host && projects.find(p => p.id === host.projectId);
+        if (!host || !hostProject) throw new Error('Open a T3 thread in this environment before installing the skill.');
+        await installProjectSkill(tabId, environmentId, hostProject, host.id, currentProject.workspaceRoot);
+      }
+      const installed = await isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot);
+      if (verb === 'install' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
+      if (scopedKey.current === key) {
+        setSkillState(installed ? 'installed' : 'not_installed');
+        if (verb === 'install') setNotice('Agent skill installed for this project.');
+      }
+    } catch (error) {
+      if (scopedKey.current === key) {
+        setSkillState('error'); setSkillError(String(error));
+      }
+      throw error;
+    } finally {
+      setSkillBusy(false);
+    }
+  }
   async function selectEnvironmentTab(value: string) {
     if (value === 'auto') { setManualTabId(null); setManualEnvironmentId(''); return; }
     const id = Number(value);
@@ -403,10 +454,10 @@ function App() {
         </label>
       </div>
     </header>
-    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','runner'] as Page[]).map(p =>
+    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','overview'] as Page[]).map(p =>
       <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
         onClick={() => setPage(p)}>
-        {p === 'kanban' ? 'Board' : 'Runner'}
+        {p === 'kanban' ? 'Board' : 'Overview'}
       </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
     {notice && <p className="notice success" role="status">{notice}</p>}
