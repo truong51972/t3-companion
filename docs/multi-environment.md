@@ -12,8 +12,10 @@ separate from the Side Panel and standalone Runner.
 
 ## Flow
 
-1. Choose a verified T3 browser tab. By default follow its native thread route;
-   optionally select another environment saved in the same tab.
+1. The Side Panel automatically selects the active recognized T3 tab and retains
+   its last connected tab while browsing unrelated sites. Manual source selection
+   remains available under Connection settings; the selected tab still supplies
+   its native thread route and saved environments.
 2. Execute a self-contained script in that tab's MAIN world. Read the existing
    browser connection catalog (IndexedDB t3code:connection-runtime,
    store catalog, key document) without modifying it.

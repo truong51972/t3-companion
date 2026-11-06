@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, describeEnvironment, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { describeEnvironment, installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
 import { isSafeOrigin, isT3Web } from '../shared/t3-site';
 import { environmentThreadUrl } from '../shared/environment-routing';
+import { selectT3Tab } from '../shared/tab-selection';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import type { SessionEnvironment } from '../bridge/page-session';
 import '../shared/styles.css';
@@ -13,7 +14,7 @@ type Task = { id: string; title: string; description?: string; prompt: string; s
   executionRequests?: { requestId: string; notBefore?: string; worktree?: string }[] };
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
-type Page = 'kanban' | 'runner';
+type Page = 'kanban' | 'overview';
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Review' }, { key: 'done', name: 'Done' },
@@ -40,6 +41,8 @@ function App() {
   const [environmentId, setEnvironmentId] = useState('');
   const [environmentLabel, setEnvironmentLabel] = useState('');
   const [manualTabId, setManualTabId] = useState<number | null>(null);
+  const selectedTabRef = useRef<number | null>(null);
+  const connectionMenu = useRef<HTMLDetailsElement>(null);
   const [tabChoices, setTabChoices] = useState<chrome.tabs.Tab[]>([]);
   const [sessionEnvironments, setSessionEnvironments] = useState<SessionEnvironment[]>([]);
   const [manualEnvironmentId, setManualEnvironmentId] = useState('');
@@ -52,6 +55,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [projectId, setProjectId] = useState('');
+  const projectSelectionRef = useRef(projectId);
+  projectSelectionRef.current = projectId;
   const [tasks, setTasks] = useState<Tasks>(emptyTasks());
   const [runtime, setRuntime] = useState<Runtime>(emptyRuntime());
   const [editing, setEditing] = useState<Task | null>(null);
@@ -68,20 +73,29 @@ function App() {
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
   const [runnerResult, setRunnerResult] = useState('Not checked');
+  const [skillState, setSkillState] = useState<'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error'>('checking');
+  const [skillBusy, setSkillBusy] = useState(false);
+  const [skillError, setSkillError] = useState('');
   const [runnerAutoStart, setRunnerAutoStart] = useState(true);
   const runnerAutoStartRef = useRef(true);
   const runnerActionInFlight = useRef(false);
-  const runnerPollPaused = useRef(false);
+  const runnerCheckedScope = useRef('');
+  const skillCheckedProject = useRef('');
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
+  const visibleRequestIds = new Set(tasks.tasks.flatMap(task => (task.executionRequests || []).map(request => request.requestId)));
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
+  const runnerBridgeMissing = /"bridgeMissing"\s*:\s*true/.test(runnerResult);
+  const runnerStarting = /"starting"\s*:\s*true/.test(runnerResult);
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   const runnerError = runnerResult.startsWith('Runner check failed: ') ? runnerResult.slice('Runner check failed: '.length) : '';
-  const runnerHostAvailable = threads.some(t => projects.some(p => p.id === t.projectId));
+  const runnerHost = threads.find(t => projects.some(p => p.id === t.projectId));
+  const runnerHostProject = runnerHost && projects.find(p => p.id === runnerHost.projectId);
+  const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
   const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
-  const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerInstalled === 'false'
+  const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerStarting ? 'Starting' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
@@ -93,16 +107,18 @@ function App() {
     return () => clearTimeout(timer);
   }, [notice]);
   useEffect(() => {
+    const menus = () => [runnerProjectsMenu.current, connectionMenu.current];
     const closeOnOutsideClick = (event: PointerEvent) => {
-      const menu = runnerProjectsMenu.current;
-      if (menu?.open && !event.composedPath().includes(menu)) menu.open = false;
+      const path = event.composedPath();
+      for (const menu of menus()) if (menu?.open && !path.includes(menu)) menu.open = false;
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      const menu = runnerProjectsMenu.current;
-      if (event.key !== 'Escape' || !menu?.open) return;
-      menu.open = false;
-      menu.querySelector('summary')?.focus();
-      event.preventDefault();
+      if (event.key !== 'Escape') return;
+      for (const menu of menus()) if (menu?.open) {
+        menu.open = false;
+        menu.querySelector('summary')?.focus();
+        event.preventDefault();
+      }
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
     document.addEventListener('keydown', closeOnEscape);
@@ -148,10 +164,21 @@ function App() {
         chrome.tabs.query({ currentWindow: true }), chrome.storage.local.get('verifiedOrigins'),
       ]);
       const verified = new Set(Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : []);
-      setTabChoices(tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
-        (isT3Web(t.url) || verified.has(new URL(t.url).origin))));
-      const tab = manualTabId === null ? await activeTab() : await chrome.tabs.get(manualTabId);
-      if (!tab.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
+      const eligible = tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
+        (isT3Web(t.url) || verified.has(new URL(t.url).origin)));
+      // Edge may recreate the tab-scoped Side Panel. Restore the last connected
+      // T3 session from ephemeral browser storage when this panel remounts.
+      const windowId = tabs[0]?.windowId;
+      if (selectedTabRef.current === null && windowId !== undefined) {
+        const storageKey = 'lastT3Tab:' + windowId;
+        const saved = await chrome.storage.session.get(storageKey);
+        if (Number.isInteger(saved[storageKey])) selectedTabRef.current = saved[storageKey] as number;
+      }
+      setTabChoices(eligible);
+      // Prefer an active T3 tab, but keep the last selected T3 tab while browsing
+      // unrelated pages. Manual tab selection always takes precedence.
+      const tab = selectT3Tab(eligible, manualTabId, selectedTabRef.current);
+      if (!tab?.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
       // The selected T3 tab can contain multiple authenticated remote environments.
       const session = await listSessionEnvironments(tab.id);
       if (version !== refreshVersion.current) return;
@@ -166,6 +193,10 @@ function App() {
         setProjects([]); setThreads([]); setProjectId('');
         setTasks(emptyTasks()); setRuntime(emptyRuntime());
         setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
+      }
+      selectedTabRef.current = tab.id;
+      if (tab.windowId !== undefined) {
+        void chrome.storage.session.set({ ['lastT3Tab:' + tab.windowId]: tab.id });
       }
       setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
       setEnvironmentLabel(descriptor.label); setRecognized(true);
@@ -190,74 +221,126 @@ function App() {
     return () => { active = false; filesVersion.current++; };
   }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
-    const changed = () => { if (manualTabId === null) void refresh(); };
+    const changed = ({ tabId: activeId }: chrome.tabs.OnActivatedInfo) => {
+      if (manualTabId !== null) return;
+      // An unrelated website is not a reason to discard an authenticated T3 session.
+      void (async () => {
+        try {
+          const tab = await chrome.tabs.get(activeId);
+          if (!tab.url || !isSafeOrigin(tab.url)) return;
+          const stored = await chrome.storage.local.get('verifiedOrigins');
+          const verified = Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : [];
+          if (isT3Web(tab.url) || verified.includes(new URL(tab.url).origin)) await refresh();
+        } catch { /* tab closed during activation */ }
+      })();
+    };
     const updated = (id: number, change: { url?: string; status?: string }) => {
-      if ((manualTabId === null ? id === tabId : id === manualTabId) && (change.url || change.status === 'complete')) void refresh();
+      if (id === (manualTabId ?? selectedTabRef.current) && (change.url || change.status === 'complete')) void refresh();
+    };
+    const removed = (id: number) => {
+      if (id === manualTabId) setManualTabId(null);
+      else if (id === selectedTabRef.current) {
+        selectedTabRef.current = null;
+        void refresh();
+      }
     };
     chrome.tabs.onActivated.addListener(changed);
     chrome.tabs.onUpdated.addListener(updated);
-    return () => { chrome.tabs.onActivated.removeListener(changed); chrome.tabs.onUpdated.removeListener(updated); };
-  }, [refresh, manualTabId, tabId]);
-  useEffect(() => {
-    if (!tabId || !environmentId || !currentProject || !recognized || editing || queueTarget || busy) return;
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        const key = scopedKey.current;
-        void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (scopedKey.current === key) setError(String(e)); });
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [tabId, environmentId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
-  // Side Panel heartbeat: start an installed Runner while this panel is open.
-  // Installation is a separate explicit action on the selected T3 environment.
+    chrome.tabs.onRemoved.addListener(removed);
+    return () => {
+      chrome.tabs.onActivated.removeListener(changed);
+      chrome.tabs.onUpdated.removeListener(updated);
+      chrome.tabs.onRemoved.removeListener(removed);
+    };
+  }, [refresh, manualTabId]);
+
+  // File data is read on connection, project changes, and explicit user actions.
+  // No fixed-interval RPC polling; it caused repeated WebSocket timeouts.
+  // Runner status is also checked only once per selected environment.
   useEffect(() => {
     if (!tabId || !environmentId || !recognized) return;
-    const host = threads.find(t => projects.some(p => p.id === t.projectId));
-    const hostProject = host && projects.find(p => p.id === host.projectId);
-    if (!host || !hostProject) return; // T3 Terminal RPC needs an existing thread.
+    if (!runnerHost || !runnerHostProject) return; // T3 terminal RPC needs a thread.
     const scope = tabId + ':' + environmentId;
+    if (runnerCheckedScope.current === scope) return;
+    runnerCheckedScope.current = scope;
     const flag = 'runnerAutoStartDisabled:' + environmentId;
     let active = true;
-    let checking = false;
-    runnerPollPaused.current = false;
-    const check = async () => {
-      if (checking || !active || runnerActionInFlight.current || runnerPollPaused.current) return;
-      checking = true;
+    void (async () => {
       try {
         const saved = await chrome.storage.local.get(flag);
         const enabled = saved[flag] !== true;
-        if (active && scopedKey.current === scope) { runnerAutoStartRef.current = enabled; setRunnerAutoStart(enabled); }
-        const output = await runnerCommand(tabId, environmentId, hostProject, host.id, 'status');
-        const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
+        if (!active || scopedKey.current !== scope || runnerActionInFlight.current) return;
+        runnerAutoStartRef.current = enabled;
+        setRunnerAutoStart(enabled);
+        runnerActionInFlight.current = true;
+        const output = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'status');
         if (!active || scopedKey.current !== scope) return;
-        if (status.installed && !status.running && enabled && runnerAutoStartRef.current && !runnerActionInFlight.current) {
-          const started = await runnerCommand(tabId, environmentId, hostProject, host.id, 'start');
+        const status = JSON.parse(output) as { installed?: boolean; running?: boolean; bridgeMissing?: boolean };
+        if (status.installed && !status.bridgeMissing && !status.running && enabled && runnerAutoStartRef.current) {
+          const started = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'start');
           if (active && scopedKey.current === scope) setRunnerResult(started);
         } else {
           setRunnerResult(output);
         }
       } catch (error) {
-        if (active && scopedKey.current === scope) {
-          runnerPollPaused.current = true; // Avoid spawning another terminal every 15s on persistent failure.
+        if (active && scopedKey.current === scope)
           setRunnerResult('Runner check failed: ' + String(error));
-        }
       } finally {
-        checking = false;
+        runnerActionInFlight.current = false;
       }
-    };
-    void check();
-    const timer = setInterval(() => { void check(); }, 15000);
-    return () => { active = false; clearInterval(timer); };
-  }, [tabId, environmentId, recognized, threads, projects]);
+    })();
+    return () => { active = false; };
+  }, [tabId, environmentId, recognized, runnerHost?.id, runnerHostProject?.id]);
+
+  // Skill checks are read-only project RPC calls; avoid extra terminal history.
+  useEffect(() => {
+    if (page !== 'overview') return;
+    if (!tabId || !environmentId || !currentProject || !recognized) {
+      setSkillState('unavailable');
+      return;
+    }
+    let active = true;
+    const key = scopedKey.current;
+    const projectKey = key + ':' + currentProject.workspaceRoot;
+    if (skillCheckedProject.current === projectKey) return;
+    setSkillState('checking'); setSkillError('');
+    void isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot)
+      .then(installed => {
+        if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
+          skillCheckedProject.current = projectKey;
+          setSkillState(installed ? 'installed' : 'not_installed');
+        }
+      })
+      .catch(error => {
+        if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
+          skillCheckedProject.current = projectKey;
+          setSkillState('error'); setSkillError(String(error));
+        }
+      });
+    return () => { active = false; };
+  }, [page, tabId, environmentId, projectId, currentProject?.workspaceRoot, recognized]);
 
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
+  async function refreshProjectData() {
+    if (!tabId || !environmentId || !currentProject) return;
+    const key = scopedKey.current;
+    const selectedProjectId = projectId;
+    setBusy(true); setError('');
+    try { await refreshFiles(tabId, environmentId, currentProject); }
+    catch (e) {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) setError(String(e));
+    } finally {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) setBusy(false);
+    }
+  }
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
+    const selectedProjectId = projectId;
     setBusy(true); setError(''); setNotice('');
     try {
       await f();
-      if (scopedKey.current === key) await refreshFiles(tabId, environmentId, currentProject);
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) await refreshFiles(tabId, environmentId, currentProject);
     } catch (e) { if (scopedKey.current === key) setError(String(e)); }
     finally { if (scopedKey.current === key) setBusy(false); }
   }
@@ -326,7 +409,7 @@ function App() {
     const key = scopedKey.current;
     runnerActionInFlight.current = true;
     try {
-      // Manual Stop must not be undone by the polling loop.
+      // Respect manual Stop by disabling future one-shot auto-start.
       if (verb === 'stop' || verb === 'start' || verb === 'install') {
         const enabled = verb !== 'stop';
         runnerAutoStartRef.current = enabled;
@@ -336,7 +419,6 @@ function App() {
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
         ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
-        runnerPollPaused.current = false;
         setRunnerResult(result);
         if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
@@ -347,8 +429,40 @@ function App() {
       runnerActionInFlight.current = false;
     }
   }
+  async function manageSkill(verb: 'status' | 'install') {
+    if (!tabId || !environmentId || !currentProject) return;
+    const key = scopedKey.current;
+    const selectedProjectId = projectId;
+    setSkillBusy(true); setSkillError('');
+    try {
+      if (verb === 'install') {
+        const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
+        const hostProject = host && projects.find(p => p.id === host.projectId);
+        if (!host || !hostProject) throw new Error('Open a T3 thread in this environment before installing the skill.');
+        await installProjectSkill(tabId, environmentId, hostProject, host.id, currentProject.workspaceRoot);
+      }
+      const installed = await isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot);
+      if (verb === 'install' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
+        skillCheckedProject.current = key + ':' + currentProject.workspaceRoot;
+        setSkillState(installed ? 'installed' : 'not_installed');
+        if (verb === 'install') setNotice('Agent skill installed for this project.');
+      }
+    } catch (error) {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
+        setSkillState('error'); setSkillError(String(error));
+      }
+      throw error;
+    } finally {
+      setSkillBusy(false);
+    }
+  }
   async function selectEnvironmentTab(value: string) {
-    if (value === 'auto') { setManualTabId(null); setManualEnvironmentId(''); return; }
+    if (value === 'auto') {
+      setManualTabId(null); setManualEnvironmentId('');
+      connectionMenu.current?.removeAttribute('open');
+      return;
+    }
     const id = Number(value);
     const tab = tabChoices.find(t => t.id === id);
     if (!tab?.url || !isSafeOrigin(tab.url)) return;
@@ -361,6 +475,7 @@ function App() {
       if (!granted) throw new Error('Browser permission for the selected T3 host was declined.');
       setManualTabId(id);
       setManualEnvironmentId('');
+      connectionMenu.current?.removeAttribute('open');
     } catch (e) { setError(String(e)); }
   }
   return <main className="stack sidepanel">
@@ -369,20 +484,27 @@ function App() {
         <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
         <div className="header-actions">
           <span className={'connection ' + (recognized ? 'connected' : 'disconnected')} title={recognized ? 'T3 connected' : 'T3 offline'} aria-label={recognized ? 'T3 connected' : 'T3 offline'}><span className="status-dot"/></span>
+          <details className="connection-settings" ref={connectionMenu}>
+            <summary className="icon-button" aria-label="Connection settings" title="Connection settings">⚙</summary>
+            <div className="connection-menu">
+              <label htmlFor="source-tab">T3 Web session tab
+                <select id="source-tab" aria-label="T3 Web session tab" disabled={busy}
+                  value={manualTabId === null ? 'auto' : String(manualTabId)}
+                  onChange={e => void selectEnvironmentTab(e.target.value)}>
+                  <option value="auto">Auto (active T3 tab)</option>
+                  {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
+                    {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
+                  </option>)}
+                </select>
+              </label>
+              <p className="runner-hint">Uses the active T3 tab, or keeps the last connection when browsing other sites. Select a tab here to override.</p>
+              {recognized && <p className="runner-hint">Connected via {tabUrl ? new URL(tabUrl).host : 'T3 Web'}</p>}
+            </div>
+          </details>
           <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh connection" disabled={busy} onClick={() => void refresh()}>↻</button>
         </div>
       </div>
       <div className="context-row" role="group" aria-label="T3 workspace context">
-        <label className="context-field" htmlFor="environment">
-          <span>Tab</span>
-          <select id="environment" aria-label="T3 tab" disabled={busy} value={manualTabId === null ? 'auto' : String(manualTabId)}
-            onChange={e => void selectEnvironmentTab(e.target.value)}>
-            <option value="auto">Active T3 tab</option>
-            {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
-              {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
-            </option>)}
-          </select>
-        </label>
         <label className="context-field" htmlFor="session-environment">
           <span>Environment</span>
           <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
@@ -403,10 +525,10 @@ function App() {
         </label>
       </div>
     </header>
-    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','runner'] as Page[]).map(p =>
+    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','overview'] as Page[]).map(p =>
       <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
         onClick={() => setPage(p)}>
-        {p === 'kanban' ? 'Board' : 'Runner'}
+        {p === 'kanban' ? 'Board' : 'Overview'}
       </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
     {notice && <p className="notice success" role="status">{notice}</p>}
@@ -419,7 +541,11 @@ function App() {
     : page === 'kanban' ? <section className="kanban-view">
       <div className="view-header">
         <div className="view-title"><h2>Board</h2><span className="muted">{tasks.tasks.length} {tasks.tasks.length === 1 ? 'task' : 'tasks'}</span></div>
-        <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+        <div className="board-actions">
+          <button type="button" className="runner-refresh" aria-label="Refresh project tasks" title="Refresh tasks" disabled={busy}
+            onClick={() => void refreshProjectData()}>↻</button>
+          <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+        </div>
       </div>
       <div className="board-scroll">
         <div className="board">{columns.map(column => {
@@ -464,23 +590,46 @@ function App() {
         })}</div>
       </div>
     </section>
-    : <section className="runner-view">
-      <div className="view-header runner-heading">
-        <div className="view-title"><h2>Runner</h2>
-          <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')} title={runnerError || undefined}>
-            {runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}
-          </span>
-        </div>
-        <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
-          disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻</button>
+    : <section className="overview-view">
+      <div className="view-header">
+        <div className="view-title"><h2>Overview</h2><span className="muted">{currentProject.title}</span></div>
+        <button type="button" className="runner-refresh" aria-label="Refresh project overview" title="Refresh overview" disabled={busy}
+          onClick={() => void refreshProjectData()}>↻</button>
       </div>
+      <div className="overview-content">
+        <div className="overview-metrics">
+          {[
+            { label: 'Tasks', value: tasks.tasks.length },
+            { label: 'Queued', value: tasks.tasks.reduce((sum, task) => sum +
+              (task.executionRequests || []).filter(request => !runtime.requests[request.requestId]).length, 0) },
+            { label: 'Running', value: Object.entries(runtime.requests).filter(([id, entry]) => visibleRequestIds.has(id) && entry.status === 'dispatching').length },
+            { label: 'Attention', value: Object.entries(runtime.requests).filter(([id, entry]) => visibleRequestIds.has(id) &&
+              ['blocked', 'failed', 'needs_reconciliation'].includes(entry.status)).length },
+          ].map(metric => <div className="overview-metric" key={metric.label}>
+            <strong>{metric.value}</strong><span>{metric.label}</span>
+          </div>)}
+        </div>
+        <div className="overview-breakdown" aria-label="Task status breakdown">
+          {columns.map(column => {
+            const count = tasks.tasks.filter(task => task.status === column.key).length;
+            return <div className="overview-breakdown-item" key={column.key}>
+              <span className={'lane-icon ' + column.key}/><span>{column.name}</span><strong>{count}</strong>
+            </div>;
+          })}
+        </div>
+        <details className="overview-expander" open>
+          <summary><span className="overview-expander-title">Runner</span>
+            <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')}
+              title={runnerError || undefined}>{runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
+          </summary>
+          <div className="overview-expander-body">
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
         <div className="runner-toolbar">
-          {runnerInstalled === 'false' && <button className="primary" disabled={busy || !runnerHostAvailable}
-            onClick={() => void action(async () => manageRunner('install'))}>Install & Start</button>}
-          {runnerInstalled === 'true' && runnerRunning === 'false' && <button className="primary"
+          {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
+            onClick={() => void action(async () => manageRunner('install'))}>{runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up Runner controls' : 'Install & Start'}</button>}
+          {runnerInstalled === 'true' && !runnerBridgeMissing && !runnerStarting && runnerRunning === 'false' && <button className="primary"
             disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
           {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
@@ -504,6 +653,30 @@ function App() {
         </div>
         <details className="runner-output"><summary>Diagnostics</summary>
           <pre className="runner-result">{runnerResult}</pre>
+        </details>
+      </div>
+            <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
+              disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻ Refresh Runner</button>
+          </div>
+        </details>
+        <details className="overview-expander" open>
+          <summary><span className="overview-expander-title">Agent Skill</span>
+            <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}>
+              {skillState === 'installed' ? 'Installed' : skillState === 'not_installed' ? 'Not installed'
+                : skillState === 'checking' ? 'Checking…' : skillState === 'error' ? 'Error' : 'Unavailable'}
+            </span>
+          </summary>
+          <div className="overview-expander-body">
+            <p className="overview-description">Allow agents to manage .t3/tasks.json using bundled scripts instead of editing JSON manually.</p>
+            {skillError && <p className="runner-error" role="alert">{skillError}</p>}
+            <div className="runner-toolbar">
+              {skillState !== 'installed' && <button className="primary" disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
+                onClick={() => void action(async () => manageSkill('install'))}>{skillBusy ? 'Installing…' : 'Install Skill'}</button>}
+              <button type="button" disabled={busy || skillBusy} onClick={() => void action(async () => manageSkill('status'))}>Refresh</button>
+            </div>
+            <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
+            <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
+          </div>
         </details>
       </div>
     </section>}

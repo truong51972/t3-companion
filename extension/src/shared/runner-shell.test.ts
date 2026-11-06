@@ -1,96 +1,132 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readableTerminalText, runnerShellCommand, terminalSubmit, RUNNER_SOURCE_REF } from './runner-shell.ts';
+import { readableTerminalText, runnerShellCommand, terminalSubmit, CONTROL_SOURCE_REF, RUNNER_SOURCE_REF } from './runner-shell.ts';
 
 const MARKER = 'COMPANION_' + 'a'.repeat(32);
-function decode(command: string): string {
-  const match = /Buffer\.from\('([A-Za-z0-9+/=]+)','base64'\)/.exec(command);
-  assert.ok(match, 'command must contain a portable base64 Node payload');
-  return Buffer.from(match[1], 'base64').toString('utf8');
-}
 
-test('uses only Node and no POSIX or PowerShell-specific syntax', () => {
+test('ordinary commands use a fixed adapter rather than encoded JavaScript', () => {
   const command = runnerShellCommand('status', undefined, MARKER);
-  assert.ok(command.startsWith('node -e "eval(Buffer.from('));
-  assert.doesNotMatch(command, /\$HOME|printf|command -v|; fi|&&|git clone/);
-  const payload = decode(command);
-  assert.match(payload, /node:child_process/);
-  assert.match(payload, /T3_COMPANION_RESULT/);
-  assert.match(payload, /t3-runner\.mjs/);
-  assert.doesNotMatch(payload, /raw\.githubusercontent\.com/, 'polling must not embed bootstrap downloader');
+  assert.match(command, /^node -e "/);
+  assert.ok(command.includes('runner-control.cjs'));
+  assert.ok(command.includes(' -- status ' + MARKER));
+  assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64.*toString|\$HOME|git clone/);
+  assert.ok(command.length < 900, 'status must remain a compact command');
 });
 
-test('quotes hostile project names as JSON inside the encoded payload', () => {
-  const target = "/projects/my 'repo' $(touch /tmp/pwn) & whoami";
+test('start/stop commands use an even smaller launcher and fail explicitly if not set up', () => {
+  const command = runnerShellCommand('start', undefined, MARKER);
+  assert.ok(command.length < 500, 'routine commands should be very short');
+  assert.ok(command.includes('runner-control.cjs'));
+  const script = command.slice('node -e "'.length).split('" -- ')[0];
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-direct-'));
+  try {
+    const child = spawnSync(process.execPath, ['-e', script, '--', 'start', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+    });
+    assert.equal(child.status, 1);
+    assert.match(child.stdout, /T3_COMPANION_ERROR:/);
+    assert.ok(child.stdout.includes(MARKER + ':1'));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('project arguments are inert base64url data, not executable shell source', () => {
+  const target = "/projects/ümlaut 'repo' $(touch /tmp/pwn) & whoami";
   const command = runnerShellCommand('add', target, MARKER);
-  assert.ok(!command.includes(target), 'path must never appear in the shell text');
-  const payload = decode(command);
-  assert.ok(payload.includes(JSON.stringify(target)));
+  assert.ok(!command.includes(target));
   assert.ok(!command.includes('whoami'));
+  const encoded = command.split(' ').at(-1)!;
+  assert.equal(Buffer.from(encoded, 'base64url').toString('utf8'), target);
+  assert.throws(() => runnerShellCommand('add', undefined, MARKER), /Project path required/);
 });
 
-test('uninstalled Runner status can execute using just Node without npm/git', () => {
+test('uninstalled Runner status is read-only and reports control setup required', () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), 'companion-portable-'));
   try {
-    const program = decode(runnerShellCommand('status', undefined, MARKER));
-    const child = spawnSync(process.execPath, ['-e', program], {
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const child = spawnSync(process.execPath, ['-e', command.slice('node -e "'.length).split('" -- ')[0], '--', 'status', MARKER], {
       env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8',
     });
     assert.equal(child.status, 0, child.stderr);
     const line = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
     assert.ok(line, child.stdout);
-    assert.deepEqual(JSON.parse(line[1]), { installed: false, running: false, pid: null });
+    assert.deepEqual(JSON.parse(line[1]), { installed: false, running: false, pid: null, bridgeMissing: true });
     assert.ok(child.stdout.includes(MARKER + ':0'));
-  } finally {
-    rmSync(temp, { recursive: true, force: true });
-  }
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test('runner installation is pinned and only downloads the four required source files', () => {
-  const payload = decode(runnerShellCommand('install', undefined, MARKER));
-  assert.ok(payload.includes('https://raw.githubusercontent.com/truong51972/t3-companion/'));
-  assert.ok(payload.includes(RUNNER_SOURCE_REF));
-  assert.equal((payload.match(/'runner\/(?:bin|src)\//g) || []).length, 4);
+test('one-time installer fetches a fixed commit, not a moving branch', () => {
+  const command = runnerShellCommand('install', undefined, MARKER);
+  assert.match(command, /raw\.githubusercontent\.com/);
+  assert.ok(command.includes(CONTROL_SOURCE_REF));
+  assert.match(RUNNER_SOURCE_REF, /^[a-f0-9]{40}$/);
+  assert.ok(command.includes('runner-control.cjs'));
+  assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64/);
 });
 
-test('rejects invalid command marker', () => {
+test('legacy Runner is detected as installed but requiring one-time control setup', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-'));
+  try {
+    const entry = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
+    mkdirSync(path.dirname(entry), { recursive: true });
+    writeFileSync(entry, '');
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', script, '--', 'status', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /"installed":true/);
+    assert.match(child.stdout, /"bridgeMissing":true/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('one-time bootstrap writes and invokes a fixed adapter without eval or external network in test', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-bootstrap-'));
+  try {
+    const command = runnerShellCommand('install', undefined, MARKER);
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    const adapter = "console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:true}));console.log(process.argv[2]+':0')";
+    const mockedFetch = 'global.fetch=async()=>({ok:true,text:async()=>'+JSON.stringify(adapter)+'});';
+    const child = spawnSync(process.execPath, ['-e', mockedFetch + script, '--', 'install', MARKER], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 15000,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.ok(child.stdout.includes(MARKER + ':0'));
+    assert.ok(existsSync(path.join(home, '.t3', 'companion', 'runner-control.cjs')));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('invalid marker is rejected', () => {
   assert.throws(() => runnerShellCommand('status', undefined, 'bad'), /marker/);
 });
 
-test('terminal submit uses PTY Enter (CR), not Line Feed (Ctrl+J)', () => {
+test('terminal submit uses CR (PTY Enter), not LF', () => {
   const command = runnerShellCommand('status', undefined, MARKER);
   assert.equal(terminalSubmit(command), command + '\r');
-  assert.ok(!terminalSubmit(command).endsWith('\n'));
 });
 
-test('portable runner command executes through the actual shell', () => {
+test('compact status executes through POSIX sh or Windows PowerShell', () => {
   const command = runnerShellCommand('status', undefined, MARKER);
   const temp = mkdtempSync(path.join(os.tmpdir(), 'companion-shell-'));
   try {
-    const isWindows = process.platform === 'win32';
-    const child = isWindows
+    const child = process.platform === 'win32'
       ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-          // Windows CI occasionally starts PowerShell/Node slowly; keep the live PTY timeout separate.
           env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8', timeout: 45000,
         })
       : spawnSync('sh', ['-c', command], {
           env: { ...process.env, HOME: temp }, encoding: 'utf8', timeout: 15000,
         });
     assert.equal(child.status, 0, [child.error?.message, child.stderr, child.stdout].filter(Boolean).join('\n'));
-    const line = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
-    assert.ok(line, child.stdout);
-    assert.equal(JSON.parse(line[1]).installed, false);
+    assert.ok(child.stdout.includes('T3_COMPANION_RESULT:'));
     assert.ok(child.stdout.includes(MARKER + ':0'));
-  } finally {
-    rmSync(temp, { recursive: true, force: true });
-  }
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test('strips noisy PTY control sequences from runner output', () => {
-  const raw = '\u001b]2;some-title\u0007\u001b[1m{"running":true}\u001b[0m\u0007';
-  assert.equal(readableTerminalText(raw), '{"running":true}');
+test('strips PTY control sequences while preserving output line boundaries', () => {
+  const raw = '\u001b]2;title\u0007\u001b[1mT3_COMPANION_RESULT:{"running":true}\r\n' + MARKER + ':0\r\n\u001b[0m';
+  assert.equal(readableTerminalText(raw), 'T3_COMPANION_RESULT:{"running":true}\n' + MARKER + ':0');
 });

@@ -14,6 +14,7 @@
 | P5 — Releases checker and offline/manual setup | Implemented |
 | P6 — Multi-environment direct hosts | Implemented: explicit host selector, descriptor validation, isolation guards; live multi-host test required |
 | P7 — Hosted T3 Web session authorization | Experimental session adapter implemented; **real Chrome/Edge T3 Connect testing remains unverified** |
+| P8 — Overview + project Agent Skill | Board remains default; compact metrics, Runner/Skill expanders, project skill installer and task scripts; browser acceptance pending |
 
 ### Install extension
 
@@ -26,9 +27,9 @@ npm run build:extension
 
 Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select **`extension/dist/`** (not the source `extension/`). Reload the extension after every rebuild. Open T3 Web (localhost or custom Cloudflare domain) and click the Companion icon. After DOM verification, open the Side Panel.
 
-In the Side Panel, **T3 tab → Follow active T3 tab** and **Environment → Follow T3 thread** track the current browser tab and its selected environment. For another T3 host already open in the browser, select its tab and grant permission to that specific host (you may need to click the Companion icon once on a custom domain for initial verification). The separate Environment selector also lists environments saved in that tab's existing T3 Web session. Each remote descriptor is verified independently; project data and Runner controls are scoped to the selected environment. [Architecture and acceptance matrix](docs/multi-environment.md).
+In the Side Panel, the main header now shows only **Environment** and **Project**. The extension automatically follows the active recognized T3 tab and retains the last connected tab when you browse unrelated sites. For manual tab selection, open **Connection settings (gear)** beside the connection indicator; a custom host may first need to be verified by clicking the Companion icon on its page. The Environment selector can still target another environment saved in the chosen T3 Web session. Each target descriptor is verified independently. [Architecture and acceptance matrix](docs/multi-environment.md).
 
-Choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+Choose a T3 project, manage tasks on the default **Board** tab, and inspect **Overview** for project metrics plus expandable **Runner** and **Agent Skill** controls. Queue execution requests with optional `notBefore`/worktree and control the installed Runner in the Overview expander. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
 
 **Link routing:** Companion selects the environment from the active T3 Web session and verifies its actual target server descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
@@ -37,19 +38,35 @@ Choose a T3 project, manage tasks on the Kanban board, queue execution requests 
 Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment host.
 
 1. Open a T3 thread in the environment and select the project in Companion.
-2. Open **Runner**. The Side Panel checks its status automatically.
-3. If missing, click **Install & Start Runner**. Companion downloads only the four Runner source files from a **pinned commit** into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\.t3\companion\`). No Git clone, npm install, global npm link, systemd or shell-specific setup is needed.
-4. If installed but stopped, the Side Panel automatically starts it and checks again every **15 seconds** while open. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
+2. Open **Overview → Runner**. The Side Panel checks its status automatically.
+3. If missing, click **Install & Start Runner**. Companion first fetches a fixed control adapter from a pinned commit, then installs the four pinned Runner source files into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\\.t3\\companion\\`). Existing Runner source files are retained. No Git clone, global npm link, service, or shell-specific setup is needed. A previously installed Runner without the adapter shows **Setup required**; choose **Set up Runner controls** once.
+4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
 Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
 Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host's execution environment, setup/start reports an error; install those prerequisites first.
 
-**Known MVP limitation — shell history:** T3's currently exposed terminal RPC operates a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a native non-interactive command-execution endpoint. Companion uses an isolated terminal session, but the host shell may still retain its internal Node commands in PowerShell/Bash/Zsh command history. The one-time installer can be lengthy; status polling uses a smaller command. We intentionally do not delete or modify the user's shell history. This remains a limitation until a native headless command API is available.
+**Known MVP limitation — shell history:** T3's available terminal RPC uses a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a headless command endpoint. Companion invokes a short Node launcher for routine Runner actions and a fixed project-scoped `npx skills add` wrapper. Only target paths are encoded as inert base64url arguments; no executable JavaScript is base64-encoded or evaluated. The host shell may retain these commands in PowerShell/Bash/Zsh history; Companion never alters history.
 
 **Known browser limitation — Side Panel width:** Edge/Chromium owns the resizable Side Panel frame; extensions cannot read or set its width using `chrome.sidePanel`. Companion avoids redundant `setOptions()` calls, but switching away from a T3-enabled tab may still cause Edge to hide/recreate the tab-scoped panel and reset the resized width. This is not controlled by CSS or extension storage. A global/window-wide panel could change the lifecycle but would also change the T3-only visibility behavior.
 
-The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
+The Runner sources remain pinned to commit `5ae13b7b08e78668dfc5ffb290fc958cc00c6bf8`. The control adapter is separately pinned to commit `715b00ce618ab821ee308bd5566723b9782b521d`. This is a one-time bootstrap; future control updates require an explicit **Set up Runner controls** action (or a later update flow), not background downloads.
+
+### Agent Skill — project-scoped, optional
+
+**Overview → Agent Skill** checks whether `t3-companion` is installed in the project's canonical `.agents/skills/t3-companion/SKILL.md` path. It performs **one read-only T3 RPC** when opening Overview or switching projects; use **Refresh** after an external install. No repeated polling, directory scanning, or terminal execution is needed for status.
+
+Click **Install Skill** to execute the standard `npx skills add` command on the selected T3 environment **with the selected project as working directory**. An existing T3 thread on that environment is needed for the terminal RPC. Or install manually in the project:
+
+```sh
+npx skills add truong51972/t3-companion --skill t3-companion -y
+```
+
+The `skills` CLI currently requires **Node.js 22.20+** (Node.js 24 works); Runner itself keeps its existing Node.js 22.16+ requirement. No custom skill registry, version manager, or always-on helper is needed. The installer fetches the skill from the repository's default branch; for a not-yet-merged PR, use the branch-specific source if you need to preview it.
+
+The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks.mjs` to list, add, update, remove, or queue tasks in `.t3/tasks.json`. **Adding a backlog task never queues execution**; `queue` explicitly creates an execution request. The script uses Node.js built-ins and temporary-file atomic rename. It never edits Runner-owned `.t3/runtime.json`.
+
+**Concurrent editing limitation:** the skill script detects changed file content immediately before writing, but this is not an atomic cross-writer lock. The T3 extension's upstream `projects.writeFile` still lacks CAS/atomic replace. Avoid simultaneous edits of one project's tasks from multiple Side Panels/agents until a shared write path exists.
 
 ### One-pass browser acceptance checklist
 
@@ -60,11 +77,11 @@ The installer is intentionally version-pinned to the implementation included in 
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
 7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, click it even from the host's home page: the selected verified T3 tab should navigate to the linked environment/thread route. Verify an older execution is available from Task Details.
-8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread on that environment host and the Node.js prerequisite.
-9. Close browser; confirm Runner continues dispatching. Reopen the Side Panel and verify status polling and automatic restart if stopped.
+8. From Overview → Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread on that environment host and the Node.js prerequisite.
+9. From Overview → Agent Skill, check Not installed, use Install Skill, verify Installed for the selected project, switch projects and verify separate detection. Create a task via the bundled script (no automatic execution), then explicitly queue it. Close browser; confirm Runner continues dispatching. Reopen Side Panel: verify a one-shot Runner check and Auto-start if stopped, without repeated polling.
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
-12. Open two direct T3 hosts in distinct tabs; select each and grant scoped host permission. Verify disjoint projects/tasks/Runner status and correct linked-thread navigation; changes on the non-selected host must never mutate the selected host.
+12. Open two direct T3 hosts in distinct tabs; auto-select the active T3 tab, or use **Connection settings** to select another and grant scoped host permission. Switch to an unrelated website and verify the selected session stays connected. Verify disjoint projects/tasks/Runner status and safe linked-thread navigation.
 13. In `app.t3.codes`, open a remote T3 Connect thread and verify its shell, tasks, Runner, and linked navigation. Repeat with a second remote environment via the selector.
 14. Check expired session credentials and mismatched remote descriptors. Companion must fail without falling back to the tab host; CI cannot verify authenticated browser scenarios.
 
@@ -73,6 +90,7 @@ The installer is intentionally version-pinned to the implementation included in 
 - DOM fingerprinting is read-only *detection*, **not authentication**. Every RPC request is authorized independently by T3 Code's existing session and permission system.
 - No access to private React/Zustand state or Companion REST API. The page-context adapter reads existing browser session authorization, but never returns credentials or stores them in the extension or Runner.
 - Runner persists `dispatching` before launching the agent and does not retry ambiguous launch results automatically.
+- The **standalone Runner** still polls its local registered project files every 10 seconds to dispatch queued tasks. This is **not** browser RPC polling. The Side Panel does not poll tasks, Runner status, or Agent Skill status; use their explicit Refresh controls after changes made outside Companion.
 - `projects.writeFile` in upstream T3 is **not atomic** and offers no CAS operation. Companion checks the latest task before saving, but editing one project in simultaneous Side Panels is unsafe. See [bridge notes](extension/src/bridge/README.md).
 - Every request binds to the selected session environment and checks the actual target's `/.well-known/t3/environment` descriptor before sending credentials.
 - Hosted T3 Connect saved authorization is reused via an internal IndexedDB/DPoP compatibility adapter, not T3's live WebSocket connection. T3 Web remains responsible for token refresh. See [multi-environment decision](docs/multi-environment.md).

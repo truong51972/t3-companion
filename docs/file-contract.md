@@ -1,6 +1,6 @@
 # File contract v1
 
-The Extension owns task definitions; the Runner owns execution metadata. Both use the T3 environment's **project filesystem**, not a central server.
+The Board and optional project Agent Skill can edit task definitions; the Runner alone owns execution metadata. All use the T3 environment's **project filesystem**, not a central server.
 
 ## Registry — `~/.t3/runner/projects.json`
 
@@ -39,4 +39,4 @@ Runtime statuses: `dispatching | completed | blocked | failed | needs_reconcilia
 
 ## Consistency
 
-Runner writes with sibling temporary file plus atomic rename (same filesystem). It skips invalid JSON without resetting it. Extension must never write `runtime.json`; Runner must never rewrite `tasks.json`. **Verified upstream limitation:** T3's current `projects.writeFile` truncates the target in place (`O_TRUNC`) and is not an atomic replace. The MVP enables Extension CRUD with a read-before-write comparison to detect stale edits, but this is **not atomic compare-and-swap**: concurrent panels or an interrupted write can still lose or corrupt task changes. Keep one active editor per project for this MVP; cross-panel CAS or atomic server-side writes remain future work. The Runner is the only writer to runtime per registered project; the runtime must not be modified by other processes.
+Runner writes with sibling temporary file plus atomic rename (same filesystem). It skips invalid JSON without resetting it. Neither the Board nor the Agent Skill may write `runtime.json`; Runner must never rewrite `tasks.json`. **Verified upstream limitation:** T3's current `projects.writeFile` truncates the target in place (`O_TRUNC`) and is not an atomic replace. The MVP enables Board CRUD with a read-before-write comparison and the skill script uses read-compare + temporary-file rename, but neither provides **atomic cross-writer compare-and-swap**: concurrent panels or an interrupted write can still lose or corrupt task changes. Keep one active writer per project for this MVP; cross-panel CAS or atomic server-side writes remain future work. The Runner is the only writer to runtime per registered project; the runtime must not be modified by other processes.
