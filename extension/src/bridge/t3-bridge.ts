@@ -2,6 +2,7 @@ import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
 import { describeSessionEnvironment, sessionRpc } from './page-session';
 export { listSessionEnvironments } from './page-session';
 import { readableTerminalText, runnerShellCommand, terminalSubmit, type RunnerVerb } from '../shared/runner-shell';
+import { skillInstallShellCommand, SKILL_PATHS } from '../shared/skill-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
@@ -91,6 +92,15 @@ export async function readProjectJson<T>(tabId: number, environmentId: string, c
 export async function writeProjectJson(tabId: number, environmentId: string, cwd: string, file: string, data: unknown): Promise<void> {
   await rpc(tabId, environmentId, 'projects.writeFile', { cwd, relativePath: `.t3/${file}`, contents: `${JSON.stringify(data, null, 2)}\n` });
 }
+/** Read project-scoped skill locations without invoking a shell or relying on the local browser filesystem. */
+export async function isProjectSkillInstalled(tabId: number, environmentId: string, cwd: string): Promise<boolean> {
+  const results = await Promise.all(SKILL_PATHS.map(async relativePath => rpc<{contents: string; exists?: boolean; truncated: boolean}>(
+    tabId, environmentId, 'projects.readFile', { cwd, relativePath, allowMissing: true },
+  )));
+  return results.some(result => result.exists !== false && !result.truncated &&
+    /^name:\s*t3-companion\s*$/m.test(result.contents || ''));
+}
+
 export async function launchThread(tabId: number, environmentId: string, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
   const model = project.defaultModelSelection || fallbackModel;
   if (!model) throw new Error('Select a default model in T3 project settings or open a T3 session first');
@@ -109,11 +119,12 @@ export async function sendThread(tabId: number, environmentId: string, threadId:
   });
 }
 
-/** Uses the T3 terminal only to run the installed t3-runner CLI; never keeps a runner alive through the terminal. */
-export async function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string, verb: RunnerVerb, target?: string): Promise<string> {
+/** Runs a bounded, isolated terminal operation in the selected authenticated T3 environment. */
+async function terminalCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
+  commandFor: (marker: string) => string, timeoutMs: number): Promise<string> {
   const id = crypto.randomUUID();
   const marker = `COMPANION_${crypto.randomUUID().replaceAll('-', '')}`;
-  const command = runnerShellCommand(verb, target, marker);
+  const command = commandFor(marker);
   await rpc(tabId, environmentId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
   try {
     // Use a one-shot command, with a marker to distinguish output from shell prompts.
@@ -126,7 +137,7 @@ export async function runnerCommand(tabId: number, environmentId: string, projec
         await new Promise(resolve => setTimeout(resolve, 250));
       }
     }
-    const deadline = Date.now() + (verb === 'install' ? 90000 : 20000);
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 350));
       const event = await rpc<any>(tabId, environmentId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
@@ -144,4 +155,18 @@ export async function runnerCommand(tabId: number, environmentId: string, projec
   } finally {
     await rpc(tabId, environmentId, 'terminal.close', { threadId: hostThreadId, terminalId: id }).catch(() => {});
   }
+}
+
+/** Runner stays independent of this terminal's lifecycle. */
+export function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
+  verb: RunnerVerb, target?: string): Promise<string> {
+  return terminalCommand(tabId, environmentId, project, hostThreadId,
+    marker => runnerShellCommand(verb, target, marker), verb === 'install' ? 90000 : 20000);
+}
+
+/** The installer uses npx skills add with the selected project's cwd; no automatic install. */
+export function installProjectSkill(tabId: number, environmentId: string, project: Project, hostThreadId: string,
+  targetProjectRoot: string): Promise<string> {
+  return terminalCommand(tabId, environmentId, project, hostThreadId,
+    marker => skillInstallShellCommand(targetProjectRoot, marker), 105000);
 }
