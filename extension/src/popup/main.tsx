@@ -5,6 +5,12 @@ import { checkLatestRelease, newerVersion, releasesPage, type LatestRelease } fr
 import '../shared/styles.css';
 import './popup.css';
 
+async function setPanelEnabled(tabId: number, enabled: boolean) {
+  const current = await chrome.sidePanel.getOptions({ tabId });
+  if (current.enabled === enabled && (!enabled || current.path === 'sidepanel.html')) return;
+  await chrome.sidePanel.setOptions({ tabId, ...(enabled ? { path: 'sidepanel.html' } : {}), enabled });
+}
+
 function Popup() {
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [detected, setDetected] = useState(false);
@@ -23,7 +29,7 @@ function Popup() {
         if (!alive) return;
         setTab(t); setDetected(recognized);
         if (t.id) {
-          await chrome.sidePanel.setOptions({ tabId: t.id, path: 'sidepanel.html', enabled: recognized });
+          await setPanelEnabled(t.id, recognized);
           const state = await chrome.storage.session.get(`open:${t.id}`);
           if (alive) setOpen(Boolean(state[`open:${t.id}`]));
         }
@@ -38,7 +44,7 @@ function Popup() {
     try {
       if (open) await chrome.sidePanel.close({ tabId: tab.id });
       else {
-        await chrome.sidePanel.setOptions({ tabId: tab.id, path: 'sidepanel.html', enabled: true });
+        await setPanelEnabled(tab.id, true);
         await chrome.sidePanel.open({ tabId: tab.id });
       }
       setOpen(!open);
@@ -50,7 +56,7 @@ function Popup() {
     try {
       const recognized = await detectTab(tab);
       setDetected(recognized);
-      if (tab.id !== undefined) await chrome.sidePanel.setOptions({ tabId: tab.id, path: 'sidepanel.html', enabled: recognized });
+      if (tab.id !== undefined) await setPanelEnabled(tab.id, recognized);
     } catch (e) { setError(String(e)); }
     finally { setChecking(false); }
   }
