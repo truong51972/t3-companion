@@ -71,8 +71,8 @@ The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks
 ### One-pass browser acceptance checklist
 
 1. Build, load `extension/dist/`, confirm popup shows version and recognizes `http://localhost:3773`.
-2. Visit T3 through custom `https://<your-cloudflare-domain>/`; click the Companion icon, check **Detected** and open Side Panel. On unrelated HTTPS pages it must stay disabled.
-3. Switch between T3 chats and verify Side Panel remains visible; choose another project from the dropdown.
+2. Visit T3 through custom `https://<your-cloudflare-domain>/`; click the Companion icon, check **Detected** and open Side Panel. The popup must not start a new connection from an unverified site; an already-open window Side Panel remains available when switching tabs.
+3. Switch between T3 chats and unrelated tabs; verify that the window Side Panel stays mounted (no reload) and the selected T3 session is retained; choose another project from the dropdown.
 4. Create a task with title/description/prompt/priority; refresh; verify it persisted in `.t3/tasks.json`.
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.

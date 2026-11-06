@@ -68,13 +68,14 @@ export async function pageOperation(
     (cached.socket?.readyState === WebSocket.OPEN || cached.connecting)) {
     return sendRpc(cached, method, payload, timeoutMs);
   }
-  // Coalesce simultaneous cold-start authorization (e.g. two project file reads).
+  // Serialize cold-start authorization across environments; once connected,
+  // requests on the same environment multiplex without waiting for another RPC.
   // Once the first connection exists, subsequent calls multiplex immediately.
   const preparationKey = Symbol.for('t3-companion.rpc-preparing.v1');
   type Preparation = { environmentId: string; done: Promise<void> };
   const preparationPage = globalThis as unknown as Record<symbol, Preparation | undefined>;
   const previous = preparationPage[preparationKey];
-  if (operation === 'rpc' && preferredEnvironmentId && previous?.environmentId === preferredEnvironmentId) {
+  if (operation === 'rpc' && preferredEnvironmentId && previous) {
     await previous.done;
     return pageOperation(operation, preferredEnvironmentId, method, payload, timeoutMs);
   }
