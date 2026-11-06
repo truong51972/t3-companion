@@ -284,6 +284,12 @@ function App() {
             {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
           </button>)}</div>
         {!visibleThreads.length && <p className="muted">Open a T3 session in this project to enable terminal commands.</p>}
+        <details className="runner-setup" open={error.includes('Runner is not installed')}>
+          <summary>Quick setup (WSL / Linux)</summary>
+          <p className="muted">On the T3 host, clone Companion once and start its runner. Node.js 22.16+ and the T3 CLI are required. No global npm link or PATH setup is needed.</p>
+          <pre className="setup-commands">{'git clone -b feat/companion-runner-foundation https://github.com/truong51972/t3-companion.git ~/.t3/companion\nnode ~/.t3/companion/runner/bin/t3-runner.mjs start'}</pre>
+          <p className="muted">Source: ~/.t3/companion · Runtime data: ~/.t3/runner. Then press Status or Register project.</p>
+        </details>
         <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
       </div>
     </section>}
