@@ -47,6 +47,8 @@ Runner control reuses the selected environment's authenticated T3 Terminal RPC, 
 
 **Known MVP limitation — shell history:** T3's currently exposed terminal RPC operates a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a native non-interactive command-execution endpoint. Companion uses an isolated terminal session, but the host shell may still retain its internal Node commands in PowerShell/Bash/Zsh command history. The one-time installer can be lengthy; status polling uses a smaller command. We intentionally do not delete or modify the user's shell history. This remains a limitation until a native headless command API is available.
 
+**Known browser limitation — Side Panel width:** Edge/Chromium owns the resizable Side Panel frame; extensions cannot read or set its width using `chrome.sidePanel`. Companion avoids redundant `setOptions()` calls, but switching away from a T3-enabled tab may still cause Edge to hide/recreate the tab-scoped panel and reset the resized width. This is not controlled by CSS or extension storage. A global/window-wide panel could change the lifecycle but would also change the T3-only visibility behavior.
+
 The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
 
 ### One-pass browser acceptance checklist
