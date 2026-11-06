@@ -10,3 +10,9 @@ Verified upstream contracts (pingdotgg/t3code):
 - `packages/contracts/src/project.ts`: `ProjectReadFileInput` / `ProjectWriteFileInput` (both use `cwd` and `relativePath`).
 
 No working bridge is claimed in this stage. P0 deliberately shows disconnected UI instead of fake task/session data.
+
+## Verified blocker: non-atomic T3 file writes
+
+In upstream `apps/server/src/workspace/WorkspaceFileSystem.ts`, `projects.writeFile` currently writes directly to the destination with `O_TRUNC` (see `WorkspaceFileSystem.writeFile`), rather than temporary file + rename. Consequently **it does not satisfy the agreed atomic-write requirement for `.t3/tasks.json`**. Do not enable extension task CRUD by directly calling `projects.writeFile` until an atomic file-update path is proven. A separate writer process/service is *not* the default solution; investigate a supported authenticated T3 Terminal RPC operation or other existing atomic operation, validate permissions, and keep the design backend-free. Concurrent editing also requires protection against lost updates, independently of atomic replacement.
+
+Upstream source: https://github.com/pingdotgg/t3code/blob/main/apps/server/src/workspace/WorkspaceFileSystem.ts
