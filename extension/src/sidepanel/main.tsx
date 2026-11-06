@@ -89,7 +89,9 @@ function App() {
   const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   const runnerError = runnerResult.startsWith('Runner check failed: ') ? runnerResult.slice('Runner check failed: '.length) : '';
-  const runnerHostAvailable = threads.some(t => projects.some(p => p.id === t.projectId));
+  const runnerHost = threads.find(t => projects.some(p => p.id === t.projectId));
+  const runnerHostProject = runnerHost && projects.find(p => p.id === runnerHost.projectId);
+  const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
   const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
   const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
@@ -244,9 +246,7 @@ function App() {
   // Runner status is also checked only once per selected environment.
   useEffect(() => {
     if (!tabId || !environmentId || !recognized) return;
-    const host = threads.find(t => projects.some(p => p.id === t.projectId));
-    const hostProject = host && projects.find(p => p.id === host.projectId);
-    if (!host || !hostProject) return; // T3 terminal RPC needs a thread.
+    if (!runnerHost || !runnerHostProject) return; // T3 terminal RPC needs a thread.
     const scope = tabId + ':' + environmentId;
     if (runnerCheckedScope.current === scope) return;
     runnerCheckedScope.current = scope;
@@ -260,11 +260,11 @@ function App() {
         runnerAutoStartRef.current = enabled;
         setRunnerAutoStart(enabled);
         runnerActionInFlight.current = true;
-        const output = await runnerCommand(tabId, environmentId, hostProject, host.id, 'status');
+        const output = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'status');
         if (!active || scopedKey.current !== scope) return;
         const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
         if (status.installed && !status.running && enabled && runnerAutoStartRef.current) {
-          const started = await runnerCommand(tabId, environmentId, hostProject, host.id, 'start');
+          const started = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'start');
           if (active && scopedKey.current === scope) setRunnerResult(started);
         } else {
           setRunnerResult(output);
@@ -277,7 +277,7 @@ function App() {
       }
     })();
     return () => { active = false; };
-  }, [tabId, environmentId, recognized, threads, projects]);
+  }, [tabId, environmentId, recognized, runnerHost?.id, runnerHostProject?.id]);
 
   // Skill checks are read-only project RPC calls; avoid extra terminal history.
   useEffect(() => {
@@ -290,21 +290,36 @@ function App() {
     const key = scopedKey.current;
     const projectKey = key + ':' + currentProject.workspaceRoot;
     if (skillCheckedProject.current === projectKey) return;
-    skillCheckedProject.current = projectKey;
     setSkillState('checking'); setSkillError('');
     void isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot)
       .then(installed => {
-        if (active && scopedKey.current === key) setSkillState(installed ? 'installed' : 'not_installed');
+        if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
+          skillCheckedProject.current = projectKey;
+          setSkillState(installed ? 'installed' : 'not_installed');
+        }
       })
       .catch(error => {
-        if (active && scopedKey.current === key) {
+        if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
+          skillCheckedProject.current = projectKey;
           setSkillState('error'); setSkillError(String(error));
         }
       });
     return () => { active = false; };
-  }, [page, tabId, environmentId, currentProject, recognized]);
+  }, [page, tabId, environmentId, projectId, currentProject?.workspaceRoot, recognized]);
 
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
+  async function refreshProjectData() {
+    if (!tabId || !environmentId || !currentProject) return;
+    const key = scopedKey.current;
+    const selectedProjectId = projectId;
+    setBusy(true); setError('');
+    try { await refreshFiles(tabId, environmentId, currentProject); }
+    catch (e) {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) setError(String(e));
+    } finally {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) setBusy(false);
+    }
+  }
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
@@ -513,7 +528,11 @@ function App() {
     : page === 'kanban' ? <section className="kanban-view">
       <div className="view-header">
         <div className="view-title"><h2>Board</h2><span className="muted">{tasks.tasks.length} {tasks.tasks.length === 1 ? 'task' : 'tasks'}</span></div>
-        <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+        <div className="board-actions">
+          <button type="button" className="runner-refresh" aria-label="Refresh project tasks" title="Refresh tasks" disabled={busy}
+            onClick={() => void refreshProjectData()}>↻</button>
+          <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+        </div>
       </div>
       <div className="board-scroll">
         <div className="board">{columns.map(column => {
@@ -561,6 +580,8 @@ function App() {
     : <section className="overview-view">
       <div className="view-header">
         <div className="view-title"><h2>Overview</h2><span className="muted">{currentProject.title}</span></div>
+        <button type="button" className="runner-refresh" aria-label="Refresh project overview" title="Refresh overview" disabled={busy}
+          onClick={() => void refreshProjectData()}>↻</button>
       </div>
       <div className="overview-content">
         <div className="overview-metrics">
