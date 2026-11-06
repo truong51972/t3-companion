@@ -96,6 +96,11 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   return 'node -e "eval(Buffer.from(' + "'" + encoded + "','base64').toString('utf8'))" + '"';
 }
 
+/** A PTY Enter key sends CR; LF is Ctrl+J in terminal raw mode (not Enter on PowerShell). */
+export function terminalSubmit(command: string): string {
+  return command + '\r';
+}
+
 /** T3 terminals return raw PTY history, including zsh OSC, cursor and ANSI codes. */
 export function readableTerminalText(value: string): string {
   return value
