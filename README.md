@@ -1,58 +1,69 @@
 # T3 Companion
 
-**T3 Companion = Chromium Extension (Management UI) + independent local Runner (Automation) + T3 Code (agent runtime).** A lightweight, local-first design with no database or companion HTTP backend.
+**T3 Companion = Chromium Extension + standalone Runner + T3 Code.** Local-first and file-based, with no Companion HTTP service, database, Redis or T3 fork.
 
-## Current implementation / phase status
+## Status (PR #1)
 
-| Phase | Status |
+| Area | Status |
 | --- | --- |
-| P0 Chromium MV3 popup + Side Panel + T3 site detection | Implemented in source; Chrome/Edge manual smoke test still required |
-| P1 Authenticated T3 Web RPC reuse | **PoC required**; RPC methods exist upstream, but browser authentication reuse is not verified |
-| P2 Project file contract | Documented and implemented in Runner; extension CRUD awaits P1 |
-| P3 Standalone polling Runner | Implemented with safe at-most-once dispatch, 3-worker limit |
-| P4 Extension runner management via terminal RPC | Pending P1 |
-| P5 Multi-environment verification, version checker | GitHub releases check implemented; multi-env testing pending |
+| P0 — Chrome/Edge popup, Side Panel, DOM detection, custom Cloudflare domain | Implemented; browser smoke test required |
+| P1 — Direct, cookie-authenticated T3 WebSocket RPC | Implemented against inspected upstream contracts; live integration test required |
+| P2 — Project `.t3/tasks.json` Kanban CRUD, scheduling and `runtime.json` display | Implemented; concurrent panel write limitation below |
+| P3 — Runner registry, 10s polling, T3 CLI dispatch, 3 worker limit, crash recovery | Implemented; Node tests passing |
+| P4 — Runner CLI management via T3 Terminal RPC | Implemented; live integration test required |
+| P5 — Releases checker and offline/manual setup | Implemented; multi-environment T3 Connect bridge not yet available |
 
-### Extension (Chrome / Edge)
+### Install extension
 
-Requires Node.js and npm to build the extension UI. In the repo root:
+From the repository root:
 
-```bash
+```sh
 npm install
 npm run build:extension
 ```
 
-Navigate to `chrome://extensions` (or `edge://extensions`), enable **Developer mode**, select **Load unpacked**, and choose the generated `extension/dist/` directory. This uses Manifest V3, React + Vite + TypeScript. There is no content-script injection and no local backend. The popup detects supported T3 origins and opens a persistent Side Panel. In this P0 iteration the board and management controls remain disabled until the authenticated T3 bridge is validated; this is intentional, not a fully functional MVP.
+Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select **`extension/dist/`** (not the source `extension/`). Reload the extension after every rebuild. Open T3 Web (localhost or custom Cloudflare domain) and click the Companion icon. After DOM verification, open the Side Panel.
 
-The popup can check GitHub Releases and open the latest release page. No releases published yet is handled as a non-error.
+In the Side Panel choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, manage T3 sessions and control the installed Runner. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
 
-### Runner (local to each T3 environment)
+### Install and start Runner on the **T3 environment host**
 
-Requires **Node.js 22.16+** (`--experimental-strip-types`) and T3's official `t3` CLI available on the same host. Register the projects in T3 Code first. After `npm install` in the repository root, use `npx t3-runner` locally or `npm link --workspace runner` to install the CLI alias:
+Requires **Node.js 22.16+** and the `t3` CLI attached to that environment. T3 must have the target project registered.
 
-```bash
+```sh
+npm link --workspace runner
+# Confirm t3-runner and t3 are visible to the same user and PTY shell
+which t3-runner t3
+
 t3-runner add /absolute/project/path
 t3-runner list
 t3-runner start
 t3-runner status
-t3-runner stop
+# t3-runner stop    # graceful; does not interrupt T3 agent sessions
 ```
 
-For a smoke test without the Extension bridge, enqueue a task via the CLI:
+The runner is a detached Node process; it continues after browser/Side Panel closure. For automatic startup after reboot, use `systemd --user`. T3 itself must be available for dispatch. The Runner's registry is `~/.t3/runner/projects.json`, while project data is `project/.t3/tasks.json` and `runtime.json`. See [file contract](docs/file-contract.md).
 
-```bash
-t3-runner task add /absolute/project/path --title 'Check tests' --prompt 'Fix failing tests' --worktree main
-```
+### One-pass browser acceptance checklist
 
-Runner scans `~/.t3/runner/projects.json` every 10 seconds. Tasks and execution state live in each project's `.t3/tasks.json` and `.t3/runtime.json` respectively; see [docs/file-contract.md](docs/file-contract.md). The Runner is not kept alive by a T3 terminal. For boot persistence use your OS service manager (systemd user in Linux/WSL); `start` is a detached process, not an installed service. Stop is graceful: running T3 turns finish.
+1. Build, load `extension/dist/`, confirm popup shows version and recognizes `http://localhost:3773`.
+2. Visit T3 through custom `https://<your-cloudflare-domain>/`; click the Companion icon, check **Detected** and open Side Panel. On unrelated HTTPS pages it must stay disabled.
+3. Switch between T3 chats and verify Side Panel remains visible; choose another project from the dropdown.
+4. Create a task with title/description/prompt/priority; refresh; verify it persisted in `.t3/tasks.json`.
+5. Edit title, change column, delete a test task; ensure the board reflects the changes.
+6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
+7. From Sessions, start a T3 session (project default model required), then select it and send another prompt. Verify in T3's own session UI.
+8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread in that project and `t3-runner` available on the host.
+9. Close browser; confirm `t3-runner status` on WSL still reports running, and the Runner continues dispatch.
+10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
+11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
+12. Test with T3 Connect separately; report results. The direct cookie bridge does **not** implement multiplexing to other environments from `app.t3.codes`.
 
-### Safety and known boundaries
+### Safety and current limits
 
-- No direct Extension ↔ Runner HTTP connection, extra auth server, native T3 patch, or DOM integration.
-- T3 remains owner of agent sessions, approvals, worktrees and provider execution.
-- `dispatching` is written before each T3 CLI call; a crash requires explicit reconciliation to prevent duplicate sessions.
-- One Runner per registry; up to 3 concurrent requests. A plain project checkout is not processed concurrently with another plain request for the same project. Use T3-managed worktrees for isolated parallel runs.
-- Never overwrite invalid `tasks.json` or `runtime.json`.
-- Browser UI/sidepanel: P0 operational shell only; no claim of authenticated RPC functionality yet.
-
-Run local Runner and site detection tests with `npm test`. Extension dependency installation, build and browser smoke tests have not been run in the offline development container.
+- DOM fingerprinting is read-only *detection*, **not authentication**. Every RPC request is authorized independently by T3 Code's existing session and permission system.
+- No access to T3 client React/Zustand state, no cookie/token scraping, no Companion REST API.
+- Runner persists `dispatching` before launching the agent and does not retry ambiguous launch results automatically.
+- `projects.writeFile` in upstream T3 is **not atomic** and offers no CAS operation. Companion checks the latest task before saving, but editing one project in simultaneous Side Panels is unsafe. See [bridge notes](extension/src/bridge/README.md).
+- A direct T3 Web server behind Cloudflare can use the browser cookie bridge. A hosted T3 Connect client controlling arbitrary remote environments may require its own supported integration; that portion is not complete.
+- This is a beta implementation; live T3 integration and Edge/Chrome tests are to be performed on the user's host. Run local checks with `npm test`, `npm run typecheck:extension`, `npm run build:extension`.

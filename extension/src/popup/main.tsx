@@ -1,28 +1,35 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { isT3Web } from '../shared/t3-site';
+import { activeTab, detectTab, isRecognizedTab } from '../bridge/t3-bridge';
 import { checkLatestRelease, newerVersion, releasesPage, type LatestRelease } from '../shared/releases';
 import '../shared/styles.css';
 import './popup.css';
 
 function Popup() {
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
+  const [detected, setDetected] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [open, setOpen] = useState(false);
   const [release, setRelease] = useState<LatestRelease>(null);
   const [releaseStatus, setReleaseStatus] = useState('Not checked');
   const [error, setError] = useState('');
   const current = chrome.runtime.getManifest().version;
-  const detected = isT3Web(tab?.url);
   useEffect(() => {
     let alive = true;
-    void chrome.tabs.query({ active: true, currentWindow: true }).then(async ([active]) => {
-      if (!alive) return;
-      setTab(active || null);
-      if (active?.id !== undefined) {
-        const state = await chrome.storage.session.get(`open:${active.id}`);
-        if (alive) setOpen(Boolean(state[`open:${active.id}`]));
-      }
-    });
+    void (async () => {
+      try {
+        const t = await activeTab();
+        const recognized = await isRecognizedTab(t);
+        if (!alive) return;
+        setTab(t); setDetected(recognized);
+        if (t.id) {
+          await chrome.sidePanel.setOptions({ tabId: t.id, path: 'sidepanel.html', enabled: recognized });
+          const state = await chrome.storage.session.get(`open:${t.id}`);
+          if (alive) setOpen(Boolean(state[`open:${t.id}`]));
+        }
+      } catch (e) { if (alive) setError(String(e)); }
+      finally { if (alive) setChecking(false); }
+    })();
     return () => { alive = false; };
   }, []);
   async function toggle() {
@@ -37,6 +44,16 @@ function Popup() {
       setOpen(!open);
     } catch (e) { setError(String(e)); }
   }
+  async function recheck() {
+    if (!tab) return;
+    setChecking(true); setError('');
+    try {
+      const recognized = await detectTab(tab);
+      setDetected(recognized);
+      if (tab.id !== undefined) await chrome.sidePanel.setOptions({ tabId: tab.id, path: 'sidepanel.html', enabled: recognized });
+    } catch (e) { setError(String(e)); }
+    finally { setChecking(false); }
+  }
   async function check() {
     setError(''); setReleaseStatus('Checking...');
     try {
@@ -45,12 +62,14 @@ function Popup() {
     } catch (e) { setReleaseStatus('Check failed'); setError(String(e)); }
   }
   return <main className="stack popup">
-    <header className="row"><div><h1>T3 Companion</h1><p className="caption">Browser management UI</p></div><span className="tag">v{current}</span></header>
-    <div className="panel stack"><div className="row"><span>T3 Web</span><span className={`tag ${detected ? 'ok':'warn'}`}>{detected ? 'Detected' : 'Not detected'}</span></div>
-      <p className="muted">{detected ? 'Side Panel available on this tab.' : 'Open T3 Web to enable the dashboard.'}</p>
-      <button className="primary" disabled={!detected} onClick={() => void toggle()}>{open ? 'Close Side Panel' : 'Open Side Panel'}</button></div>
-    <div className="panel stack"><div className="row"><h2>Runner</h2><span className="tag">Not connected</span></div>
-      <p className="muted">Runner status will be available after the authenticated T3 RPC bridge is verified.</p></div>
+    <header className="row"><div><h1>T3 Companion</h1><p className="caption">Chromium management extension</p></div><span className="tag">v{current}</span></header>
+    <div className="panel stack">
+      <div className="row"><span>T3 Web</span><span className={`tag ${detected ? 'ok':'warn'}`}>{checking ? 'Checking…' : detected ? 'Detected' : 'Not detected'}</span></div>
+      <p className="muted">{detected ? 'Dashboard available on this tab (including custom Cloudflare domains).' : 'Open T3 Code and verify the app page to enable the dashboard.'}</p>
+      <div className="buttons"><button className="primary" disabled={!detected || checking} onClick={() => void toggle()}>{open ? 'Close Side Panel' : 'Open Side Panel'}</button><button disabled={checking} onClick={() => void recheck()}>Recheck</button></div>
+    </div>
+    <div className="panel stack"><div className="row"><h2>Runner</h2><span className="tag">Via T3 RPC</span></div>
+      <p className="muted">Open the Runner tab in the Side Panel to inspect and manage the Runner installed on the T3 environment.</p></div>
     <div className="panel stack"><div className="row"><h2>Updates</h2><span className="caption">{releaseStatus}</span></div>
       <div className="buttons"><button onClick={() => void check()}>Check Updates</button><button onClick={() => void chrome.tabs.create({ url: release?.url || releasesPage })}>{release ? 'Download Release' : 'View Releases'}</button></div></div>
     {error && <p role="alert" className="notice">{error}</p>}
