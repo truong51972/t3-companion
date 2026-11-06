@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, isRecognizedTab, launchThread, readProjectJson, rpc, runnerCommand, sendThread, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { activeTab, isRecognizedTab, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { linkedThreadUrl } from '../shared/thread-navigation';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import '../shared/styles.css';
 import './sidepanel.css';
@@ -9,8 +10,8 @@ type Status = 'todo' | 'in_progress' | 'review' | 'done';
 type Task = { id: string; title: string; description?: string; prompt: string; status: Status; priority?: number;
   executionRequests?: { requestId: string; notBefore?: string; worktree?: string }[] };
 type Tasks = { version: 1; tasks: Task[] };
-type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string; error?: string }> };
-type Page = 'kanban' | 'sessions' | 'runner';
+type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
+type Page = 'kanban' | 'runner';
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Review' }, { key: 'done', name: 'Done' },
@@ -45,23 +46,25 @@ function App() {
   const [runtime, setRuntime] = useState<Runtime>(emptyRuntime());
   const [editing, setEditing] = useState<Task | null>(null);
   const [queueTarget, setQueueTarget] = useState<Task | null>(null);
+  const [detailsTaskId, setDetailsTaskId] = useState<string | null>(null);
   const editorDialog = useRef<HTMLDialogElement>(null);
   const queueDialog = useRef<HTMLDialogElement>(null);
+  const detailsDialog = useRef<HTMLDialogElement>(null);
   const filesVersion = useRef(0);
   const shellVersion = useRef(0);
   const manualProject = useRef(false);
   const [draft, setDraft] = useState<Task>(blank());
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
-  const [sessionPrompt, setSessionPrompt] = useState('');
-  const [selectedThread, setSelectedThread] = useState('');
   const [runnerResult, setRunnerResult] = useState('Not checked');
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
+  const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
+  useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
 
   const refreshShell = useCallback(async (id: number, url: string) => {
     const version = ++shellVersion.current;
@@ -121,7 +124,7 @@ function App() {
     }, 10000);
     return () => clearInterval(interval);
   }, [tabId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
-  useEffect(() => { setSelectedThread(''); }, [projectId]);
+  useEffect(() => { setDetailsTaskId(null); }, [projectId]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !currentProject) return;
     setBusy(true); setError(''); setNotice('');
@@ -159,16 +162,31 @@ function App() {
   const taskExecution = (task: Task) => {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
   };
-  async function newThread() {
-    if (!tabId || !currentProject || !sessionPrompt.trim()) return;
-    const id = await launchThread(tabId, currentProject, sessionPrompt.trim(), visibleThreads[0]?.modelSelection);
-    setSelectedThread(id); setSessionPrompt(''); await refreshShell(tabId, tabUrl);
-    setNotice(`T3 thread started: ${id}`);
+  const taskRequests = (task: Task) => [...(task.executionRequests || [])].reverse().map(request => ({
+    request,
+    execution: runtime.requests[request.requestId],
+  }));
+  const taskLinkedThread = (task: Task) => taskRequests(task)
+    .map(item => item.execution?.threadId)
+    .find((id): id is string => typeof id === 'string' && id.length > 0);
+  const threadUrl = (threadId: string) => linkedThreadUrl(tabUrl, threads.map(t => t.id), threadId);
+
+  async function openLinkedThread(threadId: string) {
+    const url = threadUrl(threadId);
+    if (!url || !tabId) return false;
+    try {
+      await chrome.tabs.update(tabId, { url });
+      setDetailsTaskId(null);
+      return true;
+    } catch (e) {
+      setError(`Cannot open T3 thread: ${String(e)}`);
+      return false;
+    }
   }
-  async function messageThread() {
-    if (!tabId || !selectedThread || !sessionPrompt.trim()) return;
-    await sendThread(tabId, selectedThread, sessionPrompt.trim()); setSessionPrompt('');
-    setNotice('Message queued on existing T3 thread.');
+  async function openTask(task: Task) {
+    const linked = taskLinkedThread(task);
+    if (linked && await openLinkedThread(linked)) return;
+    setDetailsTaskId(task.id);
   }
   async function manageRunner(verb: 'status' | 'start' | 'stop' | 'add' | 'remove') {
     if (!tabId || !currentProject) return;
@@ -197,9 +215,9 @@ function App() {
         <span className="project-path" title={currentProject?.workspaceRoot || tabUrl}>{currentProject?.workspaceRoot || tabUrl}</span>
       </div>
     </header>
-    <nav className="nav" aria-label="Dashboard sections">{(['kanban','sessions','runner'] as Page[]).map(p =>
+    <nav className="nav" aria-label="Dashboard sections">{(['kanban','runner'] as Page[]).map(p =>
       <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined} onClick={() => setPage(p)}>
-        {p === 'kanban' ? 'Board' : p === 'sessions' ? 'Sessions' : 'Runner'}
+        {p === 'kanban' ? 'Board' : 'Runner'}
       </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
     {notice && <p className="notice success" role="status">{notice}</p>}
@@ -225,12 +243,15 @@ function App() {
                 const execution = taskExecution(task);
                 const queued = task.executionRequests?.length && !execution;
                 return <article className="task-card" key={task.id}>
-                  <div className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</div>
-                  {task.description && <p className="task-description">{task.description}</p>}
-                  <div className="task-meta">
-                    <span className="priority-label">P{task.priority || 2}</span>
-                    {(execution || queued) && <span className={'execution-status ' + (execution?.status || 'queued')}>{execution?.status?.replaceAll('_', ' ') || 'queued'}</span>}
-                  </div>
+                  <button className="task-open" type="button" aria-label={'Open ' + task.title} onClick={() => void openTask(task)}>
+                    <span className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</span>
+                    {task.description && <span className="task-description">{task.description}</span>}
+                    <span className="task-meta">
+                      <span className="priority-label">P{task.priority || 2}</span>
+                      {(execution || queued) && <span className={'execution-status ' + (execution?.status || 'queued')}>{execution?.status?.replaceAll('_', ' ') || 'queued'}</span>}
+                      {taskLinkedThread(task) && <span className="linked-label" title="Linked T3 thread">↗ Thread</span>}
+                    </span>
+                  </button>
                   <div className="task-footer">
                     <button className="queue-button" disabled={busy} onClick={() => requestExecution(task)}>Queue</button>
                     <details className="task-more">
@@ -254,27 +275,6 @@ function App() {
         })}</div>
       </div>
     </section>
-    : page === 'sessions' ? <section className="sessions-view">
-      <div className="view-header"><div className="view-title"><h2>Sessions</h2><span className="muted">{visibleThreads.length} threads</span></div></div>
-      <div className="sessions-layout">
-        <div className="session-list">
-          {visibleThreads.length === 0 && <p className="muted empty-hint">No sessions in this project.</p>}
-          {visibleThreads.map(t => <button className={'session-item ' + (selectedThread === t.id ? 'active' : '')} key={t.id} onClick={() => setSelectedThread(t.id)}>
-            <span className="session-name">{t.title}</span><span className="session-status">{t.status}</span>
-          </button>)}
-        </div>
-        <div className="session-compose">
-          <label htmlFor="thread-select">Send to</label>
-          <select id="thread-select" value={selectedThread} onChange={e => setSelectedThread(e.target.value)}>
-            <option value="">New session</option>{visibleThreads.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-          </select>
-          <label htmlFor="session-message">Message</label>
-          <textarea id="session-message" rows={5} value={sessionPrompt} onChange={e => setSessionPrompt(e.target.value)} placeholder="Describe the work for the agent"/>
-          <div className="form-actions"><button className="primary" disabled={busy || !sessionPrompt.trim()} onClick={() => void action(newThread)}>New session</button>
-            <button disabled={busy || !selectedThread || !sessionPrompt.trim()} onClick={() => void action(messageThread)}>Send message</button></div>
-        </div>
-      </div>
-    </section>
     : <section className="runner-view">
       <div className="view-header"><div className="view-title"><h2>Runner</h2><span className={"runner-state " + (runnerRunning === "true" ? "running" : runnerRunning === "false" ? "stopped" : "")}>{runnerRunning === "true" ? "Running" : runnerRunning === "false" ? "Stopped" : "Not checked"}{runnerPid ? " · PID " + runnerPid : ""}</span></div></div>
       <div className="runner-section">
@@ -283,10 +283,44 @@ function App() {
           <button disabled={busy || !visibleThreads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
             {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
           </button>)}</div>
-        {!visibleThreads.length && <p className="muted">Create a T3 session in this project to enable terminal commands.</p>}
+        {!visibleThreads.length && <p className="muted">Open a T3 session in this project to enable terminal commands.</p>}
         <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
       </div>
     </section>}
+    <dialog ref={detailsDialog} className="modal" onClose={() => setDetailsTaskId(null)}>
+      <div className="modal-heading">
+        <div><h2>{detailsTask?.title || 'Task details'}</h2><p className="muted">{detailsTask?.status.replaceAll('_', ' ')} · Priority {detailsTask?.priority || 2}</p></div>
+        <button type="button" className="icon-button" aria-label="Close task details" onClick={() => setDetailsTaskId(null)}>×</button>
+      </div>
+      <div className="modal-content">
+        {detailsTask?.description && <div className="detail-field"><strong>Description</strong><p>{detailsTask.description}</p></div>}
+        <div className="detail-field"><strong>Agent prompt</strong><p className="task-prompt">{detailsTask?.prompt}</p></div>
+        <div className="detail-field">
+          <strong>Execution history</strong>
+          {!detailsTask?.executionRequests?.length && <p className="muted">No execution requested yet.</p>}
+          {detailsTask && taskRequests(detailsTask).map(({ request, execution }) => (
+            <div className="request-row" key={request.requestId}>
+              <div className="request-info">
+                <span className="execution-status">{execution?.status?.replaceAll('_', ' ') || (request.notBefore ? 'scheduled / queued' : 'queued')}</span>
+                {request.worktree && <span className="muted">Worktree: {request.worktree}</span>}
+                {request.notBefore && <span className="muted">Not before: {new Date(request.notBefore).toLocaleString()}</span>}
+                {execution?.error && <span className="request-error">{execution.error}</span>}
+              </div>
+              {execution?.threadId && threadUrl(execution.threadId) && <button className="compact" onClick={() => void openLinkedThread(execution.threadId!)}>Open thread ↗</button>}
+              {execution?.threadId && !threadUrl(execution.threadId) && <span className="muted" title={execution.threadId}>Thread linked</span>}
+            </div>
+          ))}
+          {detailsTask && taskLinkedThread(detailsTask) && !threadUrl(taskLinkedThread(detailsTask)!) &&
+            <p className="muted">To open linked threads directly, navigate T3 Code to an existing thread in this environment first.</p>}
+          {detailsTask && taskRequests(detailsTask).some(({ execution }) => execution?.status === 'dispatching' && !execution.threadId) &&
+            <p className="muted">Runner records a thread ID after the T3 CLI returns. An active execution may not have a link yet.</p>}
+        </div>
+      </div>
+      <div className="modal-actions">
+        <button onClick={() => { if (detailsTask) { const task = detailsTask; setDetailsTaskId(null); edit(task); } }}>Edit</button>
+        <button className="primary" disabled={busy} onClick={() => { if (detailsTask) { const task = detailsTask; setDetailsTaskId(null); requestExecution(task); } }}>Queue execution</button>
+      </div>
+    </dialog>
     <dialog ref={editorDialog} className="modal" onClose={() => setEditing(null)}>
       <div className="modal-heading"><h2>{editing && tasks.tasks.some(t => t.id === editing.id) ? 'Edit task' : 'New task'}</h2>
         <button type="button" className="icon-button" aria-label="Close task editor" onClick={() => setEditing(null)}>×</button></div>
