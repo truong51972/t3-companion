@@ -5,7 +5,11 @@ async function applyTab(tabId: number, raw?: string) {
     const { verifiedOrigins = [] } = await chrome.storage.local.get('verifiedOrigins');
     const origin = new URL(raw).origin;
     const enabled = isT3Web(raw) || (verifiedOrigins as string[]).includes(origin);
-    await chrome.sidePanel.setOptions({ tabId, path: 'sidepanel.html', enabled });
+    // Avoid reconfiguring an unchanged tab-specific panel on every tab activation
+    // or page load. Edge may recreate its sidebar view when options are reapplied.
+    const current = await chrome.sidePanel.getOptions({ tabId });
+    if (current.enabled === enabled && (!enabled || current.path === 'sidepanel.html')) return;
+    await chrome.sidePanel.setOptions({ tabId, ...(enabled ? { path: 'sidepanel.html' } : {}), enabled });
   } catch { /* closed tab or forbidden URL */ }
 }
 async function initialize() {
