@@ -112,8 +112,8 @@ export async function sendThread(tabId: number, environmentId: string, threadId:
 /** Uses the T3 terminal only to run the installed t3-runner CLI; never keeps a runner alive through the terminal. */
 export async function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string, verb: RunnerVerb, target?: string): Promise<string> {
   const id = crypto.randomUUID();
-  const command = runnerShellCommand(verb, target);
   const marker = `COMPANION_${crypto.randomUUID().replaceAll('-', '')}`;
+  const command = runnerShellCommand(verb, target, marker);
   await rpc(tabId, environmentId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
   try {
     // Use a one-shot command, with a marker to distinguish output from shell prompts.
@@ -126,21 +126,18 @@ export async function runnerCommand(tabId: number, environmentId: string, projec
         await new Promise(resolve => setTimeout(resolve, 250));
       }
     }
-    const deadline = Date.now() + 12000;
+    const deadline = Date.now() + (verb === 'install' ? 90000 : 20000);
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 350));
       const event = await rpc<any>(tabId, environmentId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
       const text = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
       const m = new RegExp(`${marker}:(\\d+)`).exec(text);
       if (m) {
-        const output = text.slice(0, m.index).slice(-4000).trim();
-        if (m[1] !== '0') {
-          if (m[1] === '127' && output.includes('T3_COMPANION_RUNNER_NOT_INSTALLED')) {
-            throw new Error('Runner is not installed on the T3 host. Open Runner → Quick setup to install it under ~/.t3/companion.');
-          }
-          throw new Error(`Runner CLI exit ${m[1]}: ${output.slice(-500)}`);
-        }
-        return output;
+        const result = /T3_COMPANION_RESULT:(\{[^\r\n]*\})/.exec(text.slice(0, m.index));
+        const error = /T3_COMPANION_ERROR:([^\r\n]*)/.exec(text.slice(0, m.index));
+        if (m[1] !== '0') throw new Error(error?.[1] || 'Runner command failed on T3 host');
+        if (!result) throw new Error('Runner did not return a structured result');
+        return result[1];
       }
     }
     throw new Error('Runner terminal command timed out. Inspect T3 terminal before retrying.');
