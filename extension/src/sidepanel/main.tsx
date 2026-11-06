@@ -52,6 +52,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [projectId, setProjectId] = useState('');
+  const projectSelectionRef = useRef(projectId);
+  projectSelectionRef.current = projectId;
   const [tasks, setTasks] = useState<Tasks>(emptyTasks());
   const [runtime, setRuntime] = useState<Runtime>(emptyRuntime());
   const [editing, setEditing] = useState<Task | null>(null);
@@ -78,6 +80,7 @@ function App() {
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
+  const visibleRequestIds = new Set(tasks.tasks.flatMap(task => (task.executionRequests || []).map(request => request.requestId)));
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
@@ -279,10 +282,11 @@ function App() {
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
+    const selectedProjectId = projectId;
     setBusy(true); setError(''); setNotice('');
     try {
       await f();
-      if (scopedKey.current === key) await refreshFiles(tabId, environmentId, currentProject);
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) await refreshFiles(tabId, environmentId, currentProject);
     } catch (e) { if (scopedKey.current === key) setError(String(e)); }
     finally { if (scopedKey.current === key) setBusy(false); }
   }
@@ -375,6 +379,7 @@ function App() {
   async function manageSkill(verb: 'status' | 'install') {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
+    const selectedProjectId = projectId;
     setSkillBusy(true); setSkillError('');
     try {
       if (verb === 'install') {
@@ -385,12 +390,12 @@ function App() {
       }
       const installed = await isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot);
       if (verb === 'install' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
-      if (scopedKey.current === key) {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
         setSkillState(installed ? 'installed' : 'not_installed');
         if (verb === 'install') setNotice('Agent skill installed for this project.');
       }
     } catch (error) {
-      if (scopedKey.current === key) {
+      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
         setSkillState('error'); setSkillError(String(error));
       }
       throw error;
@@ -525,8 +530,8 @@ function App() {
             { label: 'Tasks', value: tasks.tasks.length },
             { label: 'Queued', value: tasks.tasks.reduce((sum, task) => sum +
               (task.executionRequests || []).filter(request => !runtime.requests[request.requestId]).length, 0) },
-            { label: 'Running', value: Object.values(runtime.requests).filter(entry => entry.status === 'dispatching').length },
-            { label: 'Attention', value: Object.values(runtime.requests).filter(entry =>
+            { label: 'Running', value: Object.entries(runtime.requests).filter(([id, entry]) => visibleRequestIds.has(id) && entry.status === 'dispatching').length },
+            { label: 'Attention', value: Object.entries(runtime.requests).filter(([id, entry]) => visibleRequestIds.has(id) &&
               ['blocked', 'failed', 'needs_reconciliation'].includes(entry.status)).length },
           ].map(metric => <div className="overview-metric" key={metric.label}>
             <strong>{metric.value}</strong><span>{metric.label}</span>
