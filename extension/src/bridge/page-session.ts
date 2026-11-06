@@ -15,7 +15,7 @@ type PageResult = {
   routeEnvironmentId?: string | null;
 };
 
-async function pageOperation(
+export async function pageOperation(
   operation: 'list' | 'describe' | 'rpc',
   preferredEnvironmentId: string,
   method: string,
@@ -130,7 +130,14 @@ async function pageOperation(
       const profile = profiles.find(item => item.connectionId && item.connectionId === target?.connectionId);
       const credential = (catalog.credentials || []).find(item => item.connectionId === target?.connectionId)?.credential?.token;
 
-      const useDpop = !!token && !!token.endpoint && !!token.accessToken;
+      // Match T3's native route selection: a direct pairing uses its bearer
+      // credential even if an older relay token is still cached for this host.
+      const needsDpop = target?._tag === 'RelayConnectionTarget' ||
+        (target?._tag === 'BearerConnectionTarget' && profile?.authorization === 't3-connect');
+      const useDpop = needsDpop && !!token?.endpoint && !!token.accessToken;
+      if (needsDpop && !useDpop) {
+        return fail('No fresh T3 Connect credential was saved for this environment. Open it in T3 Web, confirm it connects, and retry.');
+      }
       if (!useDpop && (!profile || !credential || profile.authorization === 't3-connect')) {
         return fail('T3 Web has no reusable authorization for this environment. Open the environment in T3 Web and retry.');
       }
