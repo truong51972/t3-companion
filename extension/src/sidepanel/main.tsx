@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, describeEnvironment, installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { describeEnvironment, installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
 import { isSafeOrigin, isT3Web } from '../shared/t3-site';
 import { environmentThreadUrl } from '../shared/environment-routing';
+import { selectT3Tab } from '../shared/tab-selection';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import type { SessionEnvironment } from '../bridge/page-session';
 import '../shared/styles.css';
@@ -40,6 +41,8 @@ function App() {
   const [environmentId, setEnvironmentId] = useState('');
   const [environmentLabel, setEnvironmentLabel] = useState('');
   const [manualTabId, setManualTabId] = useState<number | null>(null);
+  const selectedTabRef = useRef<number | null>(null);
+  const connectionMenu = useRef<HTMLDetailsElement>(null);
   const [tabChoices, setTabChoices] = useState<chrome.tabs.Tab[]>([]);
   const [sessionEnvironments, setSessionEnvironments] = useState<SessionEnvironment[]>([]);
   const [manualEnvironmentId, setManualEnvironmentId] = useState('');
@@ -76,7 +79,8 @@ function App() {
   const [runnerAutoStart, setRunnerAutoStart] = useState(true);
   const runnerAutoStartRef = useRef(true);
   const runnerActionInFlight = useRef(false);
-  const runnerPollPaused = useRef(false);
+  const runnerCheckedScope = useRef('');
+  const skillCheckedProject = useRef('');
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
@@ -99,16 +103,18 @@ function App() {
     return () => clearTimeout(timer);
   }, [notice]);
   useEffect(() => {
+    const menus = () => [runnerProjectsMenu.current, connectionMenu.current];
     const closeOnOutsideClick = (event: PointerEvent) => {
-      const menu = runnerProjectsMenu.current;
-      if (menu?.open && !event.composedPath().includes(menu)) menu.open = false;
+      const path = event.composedPath();
+      for (const menu of menus()) if (menu?.open && !path.includes(menu)) menu.open = false;
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      const menu = runnerProjectsMenu.current;
-      if (event.key !== 'Escape' || !menu?.open) return;
-      menu.open = false;
-      menu.querySelector('summary')?.focus();
-      event.preventDefault();
+      if (event.key !== 'Escape') return;
+      for (const menu of menus()) if (menu?.open) {
+        menu.open = false;
+        menu.querySelector('summary')?.focus();
+        event.preventDefault();
+      }
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
     document.addEventListener('keydown', closeOnEscape);
@@ -154,10 +160,13 @@ function App() {
         chrome.tabs.query({ currentWindow: true }), chrome.storage.local.get('verifiedOrigins'),
       ]);
       const verified = new Set(Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : []);
-      setTabChoices(tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
-        (isT3Web(t.url) || verified.has(new URL(t.url).origin))));
-      const tab = manualTabId === null ? await activeTab() : await chrome.tabs.get(manualTabId);
-      if (!tab.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
+      const eligible = tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
+        (isT3Web(t.url) || verified.has(new URL(t.url).origin)));
+      setTabChoices(eligible);
+      // Prefer an active T3 tab, but keep the last selected T3 tab while browsing
+      // unrelated pages. Manual tab selection always takes precedence.
+      const tab = selectT3Tab(eligible, manualTabId, selectedTabRef.current);
+      if (!tab?.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
       // The selected T3 tab can contain multiple authenticated remote environments.
       const session = await listSessionEnvironments(tab.id);
       if (version !== refreshVersion.current) return;
@@ -173,6 +182,7 @@ function App() {
         setTasks(emptyTasks()); setRuntime(emptyRuntime());
         setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
       }
+      selectedTabRef.current = tab.id;
       setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
       setEnvironmentLabel(descriptor.label); setRecognized(true);
       await refreshShell(tab.id, tab.url, descriptor.environmentId);
@@ -196,64 +206,77 @@ function App() {
     return () => { active = false; filesVersion.current++; };
   }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
-    const changed = () => { if (manualTabId === null) void refresh(); };
+    const changed = ({ tabId: activeId }: chrome.tabs.OnActivatedInfo) => {
+      if (manualTabId !== null) return;
+      // An unrelated website is not a reason to discard an authenticated T3 session.
+      void (async () => {
+        try {
+          const tab = await chrome.tabs.get(activeId);
+          if (!tab.url || !isSafeOrigin(tab.url)) return;
+          const stored = await chrome.storage.local.get('verifiedOrigins');
+          const verified = Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : [];
+          if (isT3Web(tab.url) || verified.includes(new URL(tab.url).origin)) await refresh();
+        } catch { /* tab closed during activation */ }
+      })();
+    };
     const updated = (id: number, change: { url?: string; status?: string }) => {
-      if ((manualTabId === null ? id === tabId : id === manualTabId) && (change.url || change.status === 'complete')) void refresh();
+      if (id === (manualTabId ?? selectedTabRef.current) && (change.url || change.status === 'complete')) void refresh();
+    };
+    const removed = (id: number) => {
+      if (id === manualTabId) setManualTabId(null);
+      else if (id === selectedTabRef.current) {
+        selectedTabRef.current = null;
+        void refresh();
+      }
     };
     chrome.tabs.onActivated.addListener(changed);
     chrome.tabs.onUpdated.addListener(updated);
-    return () => { chrome.tabs.onActivated.removeListener(changed); chrome.tabs.onUpdated.removeListener(updated); };
-  }, [refresh, manualTabId, tabId]);
-  useEffect(() => {
-    if (!tabId || !environmentId || !currentProject || !recognized || editing || queueTarget || busy) return;
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        const key = scopedKey.current;
-        void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (scopedKey.current === key) setError(String(e)); });
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [tabId, environmentId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
-  // Side Panel heartbeat: start an installed Runner while this panel is open.
-  // Installation is a separate explicit action on the selected T3 environment.
+    chrome.tabs.onRemoved.addListener(removed);
+    return () => {
+      chrome.tabs.onActivated.removeListener(changed);
+      chrome.tabs.onUpdated.removeListener(updated);
+      chrome.tabs.onRemoved.removeListener(removed);
+    };
+  }, [refresh, manualTabId]);
+
+  // File data is read on connection, project changes, and explicit user actions.
+  // No fixed-interval RPC polling; it caused repeated WebSocket timeouts.
+  // Runner status is also checked only once per selected environment.
   useEffect(() => {
     if (!tabId || !environmentId || !recognized) return;
     const host = threads.find(t => projects.some(p => p.id === t.projectId));
     const hostProject = host && projects.find(p => p.id === host.projectId);
-    if (!host || !hostProject) return; // T3 Terminal RPC needs an existing thread.
+    if (!host || !hostProject) return; // T3 terminal RPC needs a thread.
     const scope = tabId + ':' + environmentId;
+    if (runnerCheckedScope.current === scope) return;
+    runnerCheckedScope.current = scope;
     const flag = 'runnerAutoStartDisabled:' + environmentId;
     let active = true;
-    let checking = false;
-    runnerPollPaused.current = false;
-    const check = async () => {
-      if (checking || !active || runnerActionInFlight.current || runnerPollPaused.current) return;
-      checking = true;
+    void (async () => {
       try {
         const saved = await chrome.storage.local.get(flag);
         const enabled = saved[flag] !== true;
-        if (active && scopedKey.current === scope) { runnerAutoStartRef.current = enabled; setRunnerAutoStart(enabled); }
+        if (!active || scopedKey.current !== scope || runnerActionInFlight.current) return;
+        runnerAutoStartRef.current = enabled;
+        setRunnerAutoStart(enabled);
+        runnerActionInFlight.current = true;
         const output = await runnerCommand(tabId, environmentId, hostProject, host.id, 'status');
-        const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
         if (!active || scopedKey.current !== scope) return;
-        if (status.installed && !status.running && enabled && runnerAutoStartRef.current && !runnerActionInFlight.current) {
+        const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
+        if (status.installed && !status.running && enabled && runnerAutoStartRef.current) {
           const started = await runnerCommand(tabId, environmentId, hostProject, host.id, 'start');
           if (active && scopedKey.current === scope) setRunnerResult(started);
         } else {
           setRunnerResult(output);
         }
       } catch (error) {
-        if (active && scopedKey.current === scope) {
-          runnerPollPaused.current = true; // Avoid spawning another terminal every 15s on persistent failure.
+        if (active && scopedKey.current === scope)
           setRunnerResult('Runner check failed: ' + String(error));
-        }
       } finally {
-        checking = false;
+        runnerActionInFlight.current = false;
       }
-    };
-    void check();
-    const timer = setInterval(() => { void check(); }, 15000);
-    return () => { active = false; clearInterval(timer); };
+    })();
+    return () => { active = false; };
   }, [tabId, environmentId, recognized, threads, projects]);
 
   // Skill checks are read-only project RPC calls; avoid extra terminal history.
@@ -265,6 +288,9 @@ function App() {
     }
     let active = true;
     const key = scopedKey.current;
+    const projectKey = key + ':' + currentProject.workspaceRoot;
+    if (skillCheckedProject.current === projectKey) return;
+    skillCheckedProject.current = projectKey;
     setSkillState('checking'); setSkillError('');
     void isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot)
       .then(installed => {
@@ -365,7 +391,6 @@ function App() {
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
         ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
-        runnerPollPaused.current = false;
         setRunnerResult(result);
         if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
@@ -391,6 +416,7 @@ function App() {
       const installed = await isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot);
       if (verb === 'install' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
       if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
+        skillCheckedProject.current = key + ':' + currentProject.workspaceRoot;
         setSkillState(installed ? 'installed' : 'not_installed');
         if (verb === 'install') setNotice('Agent skill installed for this project.');
       }
@@ -404,7 +430,11 @@ function App() {
     }
   }
   async function selectEnvironmentTab(value: string) {
-    if (value === 'auto') { setManualTabId(null); setManualEnvironmentId(''); return; }
+    if (value === 'auto') {
+      setManualTabId(null); setManualEnvironmentId('');
+      connectionMenu.current?.removeAttribute('open');
+      return;
+    }
     const id = Number(value);
     const tab = tabChoices.find(t => t.id === id);
     if (!tab?.url || !isSafeOrigin(tab.url)) return;
@@ -417,6 +447,7 @@ function App() {
       if (!granted) throw new Error('Browser permission for the selected T3 host was declined.');
       setManualTabId(id);
       setManualEnvironmentId('');
+      connectionMenu.current?.removeAttribute('open');
     } catch (e) { setError(String(e)); }
   }
   return <main className="stack sidepanel">
@@ -425,20 +456,27 @@ function App() {
         <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
         <div className="header-actions">
           <span className={'connection ' + (recognized ? 'connected' : 'disconnected')} title={recognized ? 'T3 connected' : 'T3 offline'} aria-label={recognized ? 'T3 connected' : 'T3 offline'}><span className="status-dot"/></span>
+          <details className="connection-settings" ref={connectionMenu}>
+            <summary className="icon-button" aria-label="Connection settings" title="Connection settings">⚙</summary>
+            <div className="connection-menu">
+              <label htmlFor="source-tab">T3 Web session tab
+                <select id="source-tab" aria-label="T3 Web session tab" disabled={busy}
+                  value={manualTabId === null ? 'auto' : String(manualTabId)}
+                  onChange={e => void selectEnvironmentTab(e.target.value)}>
+                  <option value="auto">Auto (active T3 tab)</option>
+                  {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
+                    {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
+                  </option>)}
+                </select>
+              </label>
+              <p className="runner-hint">Uses the active T3 tab, or keeps the last connection when browsing other sites. Select a tab here to override.</p>
+              {recognized && <p className="runner-hint">Connected via {tabUrl ? new URL(tabUrl).host : 'T3 Web'}</p>}
+            </div>
+          </details>
           <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh connection" disabled={busy} onClick={() => void refresh()}>↻</button>
         </div>
       </div>
       <div className="context-row" role="group" aria-label="T3 workspace context">
-        <label className="context-field" htmlFor="environment">
-          <span>Tab</span>
-          <select id="environment" aria-label="T3 tab" disabled={busy} value={manualTabId === null ? 'auto' : String(manualTabId)}
-            onChange={e => void selectEnvironmentTab(e.target.value)}>
-            <option value="auto">Active T3 tab</option>
-            {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
-              {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
-            </option>)}
-          </select>
-        </label>
         <label className="context-field" htmlFor="session-environment">
           <span>Environment</span>
           <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
