@@ -2,7 +2,7 @@ import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
 import { describeSessionEnvironment, sessionRpc } from './page-session';
 export { listSessionEnvironments } from './page-session';
 import { readableTerminalText, runnerShellCommand, terminalSubmit, type RunnerVerb } from '../shared/runner-shell';
-import { skillInstallShellCommand, SKILL_PATHS } from '../shared/skill-shell';
+import { skillInstallShellCommand, SKILL_PATH } from '../shared/skill-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
@@ -92,13 +92,15 @@ export async function readProjectJson<T>(tabId: number, environmentId: string, c
 export async function writeProjectJson(tabId: number, environmentId: string, cwd: string, file: string, data: unknown): Promise<void> {
   await rpc(tabId, environmentId, 'projects.writeFile', { cwd, relativePath: `.t3/${file}`, contents: `${JSON.stringify(data, null, 2)}\n` });
 }
-/** Read project-scoped skill locations without invoking a shell or relying on the local browser filesystem. */
+/** A single canonical read avoids opening five WebSocket RPCs per status check.
+ * npx skills installs project skills to .agents/skills, with agent links as needed. */
 export async function isProjectSkillInstalled(tabId: number, environmentId: string, cwd: string): Promise<boolean> {
-  const results = await Promise.all(SKILL_PATHS.map(async relativePath => rpc<{contents: string; exists?: boolean; truncated: boolean}>(
-    tabId, environmentId, 'projects.readFile', { cwd, relativePath, allowMissing: true },
-  )));
-  return results.some(result => result.exists !== false && !result.truncated &&
-    /^name:\s*t3-companion\s*$/m.test(result.contents || ''));
+  const result = await rpc<{contents: string; exists?: boolean; truncated: boolean}>(
+    tabId, environmentId, 'projects.readFile', { cwd, relativePath: SKILL_PATH, allowMissing: true },
+  );
+  if (result.exists === false) return false;
+  if (result.truncated) throw new Error('Skill metadata is truncated');
+  return /^name:\\s*t3-companion\\s*$/m.test(result.contents || '');
 }
 
 export async function launchThread(tabId: number, environmentId: string, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
