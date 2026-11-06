@@ -1,7 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022", "DOM"], "jsx": "react-jsx", "module": "ESNext",
-    "moduleResolution": "Bundler", "strict": true, "noEmit": true, "skipLibCheck": true,
-    "types": ["chrome", "vite/client"]
-  }, "include": ["src", "vite.config.ts"]
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [
+      "chrome",
+      "vite/client"
+    ],
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
 }
