@@ -1,7 +1,7 @@
 import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
 import { describeSessionEnvironment, sessionRpc } from './page-session';
 export { listSessionEnvironments } from './page-session';
-import { readableTerminalText, runnerShellCommand, type RunnerVerb } from '../shared/runner-shell';
+import { readableTerminalText, runnerShellCommand, terminalSubmit, type RunnerVerb } from '../shared/runner-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
@@ -119,7 +119,7 @@ export async function runnerCommand(tabId: number, environmentId: string, projec
     // Use a one-shot command, with a marker to distinguish output from shell prompts.
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await rpc(tabId, environmentId, 'terminal.write', { threadId: hostThreadId, terminalId: id, data: command + '\n' });
+        await rpc(tabId, environmentId, 'terminal.write', { threadId: hostThreadId, terminalId: id, data: terminalSubmit(command) });
         break;
       } catch (error) {
         if (attempt === 4) throw error;
