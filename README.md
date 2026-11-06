@@ -28,23 +28,29 @@ In the Side Panel choose a T3 project, manage tasks on the Kanban board, queue e
 
 **Link routing limitation:** Companion only constructs a thread route when the current T3 tab is already on a recognized `/<environmentId>/<threadId>` route. It does not guess the environment from the project, read T3 frontend state, or navigate to a different T3 environment. If the T3 tab is on its home/draft route, open any existing thread there first, then return to the task. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
-### Install and start Runner on the **T3 environment host**
+### Quick setup Runner on the **T3 environment host** (WSL / Linux)
 
-Requires **Node.js 22.16+** and the `t3` CLI attached to that environment. T3 must have the target project registered.
+Requires **Node.js 22.16+** and the `t3` CLI on the same host as T3 Code. The Runner uses only Node built-ins; there is **no npm install, global npm link or shell PATH change**.
+
+For the open PR #1 beta, clone its branch directly into the user-level T3 directory:
 
 ```sh
-npm link --workspace runner
-# Confirm t3-runner and t3 are visible to the same user and PTY shell
-which t3-runner t3
-
-t3-runner add /absolute/project/path
-t3-runner list
-t3-runner start
-t3-runner status
-# t3-runner stop    # graceful; does not interrupt T3 agent sessions
+git clone -b feat/companion-runner-foundation https://github.com/truong51972/t3-companion.git ~/.t3/companion
+node ~/.t3/companion/runner/bin/t3-runner.mjs start
 ```
 
-The runner is a detached Node process; it continues after browser/Side Panel closure. For automatic startup after reboot, use `systemd --user`. T3 itself must be available for dispatch. The Runner's registry is `~/.t3/runner/projects.json`, while project data is `project/.t3/tasks.json` and `runtime.json`. See [file contract](docs/file-contract.md).
+After merge, a regular `git clone https://github.com/truong51972/t3-companion.git ~/.t3/companion` can be used instead. If the directory already exists, use `git -C ~/.t3/companion pull --ff-only` rather than cloning again.
+
+Use **Runner → Status / Register project** in the Side Panel to finish setup. Or verify from the host terminal:
+
+```sh
+node ~/.t3/companion/runner/bin/t3-runner.mjs status
+node ~/.t3/companion/runner/bin/t3-runner.mjs add /absolute/project/path
+```
+
+`~/.t3/companion/` contains the **cloned source**, while `~/.t3/runner/` remains the Runner's **data directory** (`projects.json`, log, lock). The extension invokes the script from the stable clone path if it exists, falling back to an existing global `t3-runner` command. This avoids the `zsh: command not found: t3-runner` error seen when the T3 terminal has a different npm global `PATH`.
+
+Runner is detached and remains active after closing the browser/Side Panel, but does not automatically start after a WSL reboot. T3 itself must be available for dispatch; check `command -v node` and `command -v t3` in the **same environment** if execution fails. For optional reboot startup, use `systemd --user` later. See [file contract](docs/file-contract.md).
 
 ### One-pass browser acceptance checklist
 
