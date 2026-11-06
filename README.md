@@ -28,20 +28,20 @@ The popup can check GitHub Releases and open the latest release page. No release
 
 ### Runner (local to each T3 environment)
 
-Requires **Node.js 22.16+** (`--experimental-strip-types`) and T3's official `t3` CLI available on the same host. Register the projects in T3 Code first.
+Requires **Node.js 22.16+** (`--experimental-strip-types`) and T3's official `t3` CLI available on the same host. Register the projects in T3 Code first. After `npm install` in the repository root, use `npx t3-runner` locally or `npm link --workspace runner` to install the CLI alias:
 
 ```bash
-node --experimental-strip-types runner/src/cli.ts add /absolute/project/path
-node --experimental-strip-types runner/src/cli.ts list
-node --experimental-strip-types runner/src/cli.ts start
-node --experimental-strip-types runner/src/cli.ts status
-node --experimental-strip-types runner/src/cli.ts stop
+t3-runner add /absolute/project/path
+t3-runner list
+t3-runner start
+t3-runner status
+t3-runner stop
 ```
 
 For a smoke test without the Extension bridge, enqueue a task via the CLI:
 
 ```bash
-node --experimental-strip-types runner/src/cli.ts task add /absolute/project/path --title 'Check tests' --prompt 'Fix failing tests' --worktree main
+t3-runner task add /absolute/project/path --title 'Check tests' --prompt 'Fix failing tests' --worktree main
 ```
 
 Runner scans `~/.t3/runner/projects.json` every 10 seconds. Tasks and execution state live in each project's `.t3/tasks.json` and `.t3/runtime.json` respectively; see [docs/file-contract.md](docs/file-contract.md). The Runner is not kept alive by a T3 terminal. For boot persistence use your OS service manager (systemd user in Linux/WSL); `start` is a detached process, not an installed service. Stop is graceful: running T3 turns finish.
