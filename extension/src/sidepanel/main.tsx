@@ -70,6 +70,7 @@ function App() {
   const [runnerAutoStart, setRunnerAutoStart] = useState(true);
   const runnerAutoStartRef = useRef(true);
   const runnerActionInFlight = useRef(false);
+  const runnerPollPaused = useRef(false);
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
@@ -192,8 +193,9 @@ function App() {
     const flag = 'runnerAutoStartDisabled:' + environmentId;
     let active = true;
     let checking = false;
+    runnerPollPaused.current = false;
     const check = async () => {
-      if (checking || !active || runnerActionInFlight.current) return;
+      if (checking || !active || runnerActionInFlight.current || runnerPollPaused.current) return;
       checking = true;
       try {
         const saved = await chrome.storage.local.get(flag);
@@ -209,7 +211,10 @@ function App() {
           setRunnerResult(output);
         }
       } catch (error) {
-        if (active && scopedKey.current === scope) setRunnerResult('Runner check failed: ' + String(error));
+        if (active && scopedKey.current === scope) {
+          runnerPollPaused.current = true; // Avoid spawning another terminal every 15s on persistent failure.
+          setRunnerResult('Runner check failed: ' + String(error));
+        }
       } finally {
         checking = false;
       }
@@ -305,6 +310,7 @@ function App() {
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
         ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
+        runnerPollPaused.current = false;
         setRunnerResult(result);
         if (verb !== 'status') setNotice('Runner: ' + verb);
       }
