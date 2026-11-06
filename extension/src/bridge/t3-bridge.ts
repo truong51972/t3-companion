@@ -100,7 +100,7 @@ export async function isProjectSkillInstalled(tabId: number, environmentId: stri
   );
   if (result.exists === false) return false;
   if (result.truncated) throw new Error('Skill metadata is truncated');
-  return /^name:\\s*t3-companion\\s*$/m.test(result.contents || '');
+  return /^name:\s*t3-companion\s*$/m.test(result.contents || '');
 }
 
 export async function launchThread(tabId: number, environmentId: string, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
@@ -121,7 +121,7 @@ export async function sendThread(tabId: number, environmentId: string, threadId:
   });
 }
 
-/** Runs a bounded, isolated terminal operation in the selected authenticated T3 environment. */
+/** Runs one bounded terminal operation in the selected T3 environment. */
 async function terminalCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   commandFor: (marker: string) => string, timeoutMs: number): Promise<string> {
   const id = crypto.randomUUID();
@@ -129,31 +129,37 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
   const command = commandFor(marker);
   await rpc(tabId, environmentId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
   try {
-    // Use a one-shot command, with a marker to distinguish output from shell prompts.
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // Do not blindly retry writes after an ambiguous RPC timeout: that could
+    // execute a non-idempotent install/register command more than once.
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await rpc(tabId, environmentId, 'terminal.write', { threadId: hostThreadId, terminalId: id, data: terminalSubmit(command) });
         break;
       } catch (error) {
-        if (attempt === 4) throw error;
+        const definitelyNotDelivered = /terminal.*(not ready|not found|not initialized|not open|starting)/i.test(String(error));
+        if (!definitelyNotDelivered || attempt === 2) throw error;
         await new Promise(resolve => setTimeout(resolve, 250));
       }
     }
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 350));
+      await new Promise(resolve => setTimeout(resolve, 750));
       const event = await rpc<any>(tabId, environmentId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
-      const text = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
-      const m = new RegExp(`${marker}:(\\d+)`).exec(text);
-      if (m) {
-        const result = /T3_COMPANION_RESULT:(\{[^\r\n]*\})/.exec(text.slice(0, m.index));
-        const error = /T3_COMPANION_ERROR:([^\r\n]*)/.exec(text.slice(0, m.index));
-        if (m[1] !== '0') throw new Error(error?.[1] || 'Runner command failed on T3 host');
-        if (!result) throw new Error('Runner did not return a structured result');
-        return result[1];
-      }
+      const output = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
+      // Require a complete marker line. A command echoed by the PTY contains
+      // the marker as an argument but must never be mistaken for completion.
+      const end = new RegExp('(?:^|\\n)' + marker + ':(0|1)(?:\\n|$)').exec(output);
+      if (!end) continue;
+      const before = output.slice(0, end.index);
+      const results = [...before.matchAll(/(?:^|\n)T3_COMPANION_RESULT:(\{[^\r\n]*\})/g)];
+      const errors = [...before.matchAll(/(?:^|\n)T3_COMPANION_ERROR:([^\r\n]*)/g)];
+      const result = results.at(-1)?.[1];
+      const error = errors.at(-1)?.[1];
+      if (end[1] !== '0') throw new Error(error || 'Companion terminal command failed on T3 host');
+      if (!result) throw new Error('Companion command did not return a structured result');
+      return result;
     }
-    throw new Error('Runner terminal command timed out. Inspect T3 terminal before retrying.');
+    throw new Error('Companion terminal command timed out. Check the T3 host before retrying.');
   } finally {
     await rpc(tabId, environmentId, 'terminal.close', { threadId: hostThreadId, terminalId: id }).catch(() => {});
   }
@@ -163,7 +169,7 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
 export function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   verb: RunnerVerb, target?: string): Promise<string> {
   return terminalCommand(tabId, environmentId, project, hostThreadId,
-    marker => runnerShellCommand(verb, target, marker), verb === 'install' ? 90000 : 20000);
+    marker => runnerShellCommand(verb, target, marker), verb === 'install' ? 90000 : verb === 'status' ? 18000 : 38000);
 }
 
 /** The installer uses npx skills add with the selected project's cwd; no automatic install. */
