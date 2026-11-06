@@ -67,10 +67,12 @@ function App() {
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
   const [runnerResult, setRunnerResult] = useState('Not checked');
+  const [runnerAutoStart, setRunnerAutoStart] = useState(true);
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
+  const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
@@ -172,6 +174,44 @@ function App() {
     }, 10000);
     return () => clearInterval(interval);
   }, [tabId, environmentId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
+  // Side Panel heartbeat: start an installed Runner while this panel is open.
+  // Installation is a separate explicit action on the selected T3 environment.
+  useEffect(() => {
+    if (!tabId || !environmentId || !recognized) return;
+    const host = threads.find(t => projects.some(p => p.id === t.projectId));
+    const hostProject = host && projects.find(p => p.id === host.projectId);
+    if (!host || !hostProject) return; // T3 Terminal RPC needs an existing thread.
+    const scope = tabId + ':' + environmentId;
+    const flag = 'runnerAutoStartDisabled:' + environmentId;
+    let active = true;
+    let checking = false;
+    const check = async () => {
+      if (checking || !active) return;
+      checking = true;
+      try {
+        const saved = await chrome.storage.local.get(flag);
+        const enabled = saved[flag] !== true;
+        if (active && scopedKey.current === scope) setRunnerAutoStart(enabled);
+        const output = await runnerCommand(tabId, environmentId, hostProject, host.id, 'status');
+        const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
+        if (!active || scopedKey.current !== scope) return;
+        if (status.installed && !status.running && enabled) {
+          const started = await runnerCommand(tabId, environmentId, hostProject, host.id, 'start');
+          if (active && scopedKey.current === scope) setRunnerResult(started);
+        } else {
+          setRunnerResult(output);
+        }
+      } catch (error) {
+        if (active && scopedKey.current === scope) setRunnerResult('Runner check failed: ' + String(error));
+      } finally {
+        checking = false;
+      }
+    };
+    void check();
+    const timer = setInterval(() => { void check(); }, 15000);
+    return () => { active = false; clearInterval(timer); };
+  }, [tabId, environmentId, recognized, threads, projects]);
+
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
@@ -240,11 +280,17 @@ function App() {
     if (linked && await openLinkedThread(linked)) return;
     setDetailsTaskId(task.id);
   }
-  async function manageRunner(verb: 'status' | 'start' | 'stop' | 'add' | 'remove') {
+  async function manageRunner(verb: 'install' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
     if (!tabId || !currentProject) return;
     const host = visibleThreads[0]?.id;
     if (!host) throw new Error('Create a T3 session in this project first; Terminal RPC requires a host thread.');
     const key = scopedKey.current;
+    // Stop disables automatic restart until Start / Install is requested again.
+    if (verb === 'stop' || verb === 'start' || verb === 'install') {
+      const enabled = verb !== 'stop';
+      await chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
+      setRunnerAutoStart(enabled);
+    }
     const result = await runnerCommand(tabId, environmentId, currentProject, host, verb,
       ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
     if (scopedKey.current === key) {
@@ -369,20 +415,23 @@ function App() {
       </div>
     </section>
     : <section className="runner-view">
-      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className={"runner-state " + (runnerRunning === "true" ? "running" : runnerRunning === "false" ? "stopped" : "")}>{runnerRunning === "true" ? "Running" : runnerRunning === "false" ? "Stopped" : "Not checked"}{runnerPid ? " · PID " + runnerPid : ""}</span></div></div>
+      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className={"runner-state " + (runnerRunning === "true" ? "running" : runnerRunning === "false" ? "stopped" : "")}>{runnerInstalled === "false" ? "Not installed" : runnerRunning === "true" ? "Running" : runnerRunning === "false" ? "Stopped" : "Checking"}{runnerPid ? " · PID " + runnerPid : ""}</span></div></div>
       <div className="runner-section">
-        <p className="muted">Commands use the selected T3 environment. The service runs independently of the browser.</p>
-        <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
-          <button disabled={busy || !visibleThreads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
-            {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
-          </button>)}</div>
-        {!visibleThreads.length && <p className="muted">Open a T3 session in this project to enable terminal commands.</p>}
-        <details className="runner-setup" open={error.includes('Runner is not installed')}>
-          <summary>Quick setup (WSL / Linux)</summary>
-          <p className="muted">On the T3 host, clone Companion once and start its runner. Node.js 22.16+ and the T3 CLI are required. No global npm link or PATH setup is needed.</p>
-          <pre className="setup-commands">{'git clone -b feat/companion-runner-foundation https://github.com/truong51972/t3-companion.git ~/.t3/companion\nnode ~/.t3/companion/runner/bin/t3-runner.mjs start'}</pre>
-          <p className="muted">Source: ~/.t3/companion · Runtime data: ~/.t3/runner. Then press Status or Register project.</p>
-        </details>
+        {runnerInstalled === 'false' ? <>
+          <p className="muted">Install the standalone Runner on this T3 environment with Node.js 22.16+; no Git clone or global npm install required.</p>
+          <button disabled={busy || !visibleThreads.length} onClick={() => void action(async () => manageRunner('install'))}>Install & Start Runner</button>
+        </> : <>
+          <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
+            <button disabled={busy || !visibleThreads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
+              {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
+            </button>)}</div>
+          <label className="muted"><input type="checkbox" checked={runnerAutoStart} disabled={!environmentId} onChange={event => {
+            const enabled = event.target.checked;
+            setRunnerAutoStart(enabled);
+            void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
+          }}/> Auto-start while Side Panel is open</label>
+        </>}
+        {!visibleThreads.length && <p className="muted">Open a T3 session in this project to enable Runner commands.</p>}
         <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
       </div>
     </section>}
