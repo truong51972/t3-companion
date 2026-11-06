@@ -14,6 +14,7 @@
 | P5 — Releases checker and offline/manual setup | Implemented |
 | P6 — Multi-environment direct hosts | Implemented: explicit host selector, descriptor validation, isolation guards; live multi-host test required |
 | P7 — Hosted T3 Web session authorization | Experimental session adapter implemented; **real Chrome/Edge T3 Connect testing remains unverified** |
+| P8 — Overview + project Agent Skill | Board remains default; compact metrics, Runner/Skill expanders, project skill installer and task scripts; browser acceptance pending |
 
 ### Install extension
 
@@ -28,7 +29,7 @@ Open `edge://extensions` or `chrome://extensions`, enable **Developer mode**, ch
 
 In the Side Panel, **T3 tab → Follow active T3 tab** and **Environment → Follow T3 thread** track the current browser tab and its selected environment. For another T3 host already open in the browser, select its tab and grant permission to that specific host (you may need to click the Companion icon once on a custom domain for initial verification). The separate Environment selector also lists environments saved in that tab's existing T3 Web session. Each remote descriptor is verified independently; project data and Runner controls are scoped to the selected environment. [Architecture and acceptance matrix](docs/multi-environment.md).
 
-Choose a T3 project, manage tasks on the Kanban board, queue execution requests with optional `notBefore`/worktree, and control the installed Runner. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
+Choose a T3 project, manage tasks on the default **Board** tab, and inspect **Overview** for project metrics plus expandable **Runner** and **Agent Skill** controls. Queue execution requests with optional `notBefore`/worktree and control the installed Runner in the Overview expander. **The standalone Sessions tab is removed:** click a backlog card to open its latest linked T3 thread in the existing T3 tab (using T3's own UI), or see Task Details and execution history when no navigable thread exists. A task can have multiple execution requests/threads; older linked threads are available in Task Details. Task columns (`todo`, `in_progress`, `review`, `done`) are deliberately separate from agent execution status.
 
 **Link routing:** Companion selects the environment from the active T3 Web session and verifies its actual target server descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
@@ -37,7 +38,7 @@ Choose a T3 project, manage tasks on the Kanban board, queue execution requests 
 Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment host.
 
 1. Open a T3 thread in the environment and select the project in Companion.
-2. Open **Runner**. The Side Panel checks its status automatically.
+2. Open **Overview → Runner**. The Side Panel checks its status automatically.
 3. If missing, click **Install & Start Runner**. Companion downloads only the four Runner source files from a **pinned commit** into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\.t3\companion\`). No Git clone, npm install, global npm link, systemd or shell-specific setup is needed.
 4. If installed but stopped, the Side Panel automatically starts it and checks again every **15 seconds** while open. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
@@ -51,6 +52,22 @@ Runner control reuses the selected environment's authenticated T3 Terminal RPC, 
 
 The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
 
+### Agent Skill — project-scoped, optional
+
+**Overview → Agent Skill** only checks whether `t3-companion` is installed in the selected T3 project's recognized skill directories. It reads the project's `SKILL.md` through the existing authenticated T3 `projects.readFile` RPC; it does not scan the browser's local machine or run a terminal just to check status.
+
+Click **Install Skill** to execute the standard `npx skills add` command on the selected T3 environment **with the selected project as working directory**. An existing T3 thread on that environment is needed for the terminal RPC. Or install manually in the project:
+
+```sh
+npx skills add truong51972/t3-companion --skill t3-companion -y
+```
+
+The `skills` CLI currently requires **Node.js 22.20+** (Node.js 24 works); Runner itself keeps its existing Node.js 22.16+ requirement. No custom skill registry, version manager, or always-on helper is needed. The installer fetches the skill from the repository's default branch; for a not-yet-merged PR, use the branch-specific source if you need to preview it.
+
+The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks.mjs` to list, add, update, remove, or queue tasks in `.t3/tasks.json`. **Adding a backlog task never queues execution**; `queue` explicitly creates an execution request. The script uses Node.js built-ins and temporary-file atomic rename. It never edits Runner-owned `.t3/runtime.json`.
+
+**Concurrent editing limitation:** the skill script detects changed file content immediately before writing, but this is not an atomic cross-writer lock. The T3 extension's upstream `projects.writeFile` still lacks CAS/atomic replace. Avoid simultaneous edits of one project's tasks from multiple Side Panels/agents until a shared write path exists.
+
 ### One-pass browser acceptance checklist
 
 1. Build, load `extension/dist/`, confirm popup shows version and recognizes `http://localhost:3773`.
@@ -60,8 +77,8 @@ The installer is intentionally version-pinned to the implementation included in 
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
 7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, click it even from the host's home page: the selected verified T3 tab should navigate to the linked environment/thread route. Verify an older execution is available from Task Details.
-8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread on that environment host and the Node.js prerequisite.
-9. Close browser; confirm Runner continues dispatching. Reopen the Side Panel and verify status polling and automatic restart if stopped.
+8. From Overview → Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread on that environment host and the Node.js prerequisite.
+9. From Overview → Agent Skill, check Not installed, use Install Skill, verify Installed for the selected project, switch projects and verify separate detection. Create a task via the bundled script (no automatic execution), then explicitly queue it. Close browser; confirm Runner continues dispatching. Reopen the Side Panel and verify status polling and automatic restart if stopped.
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
 12. Open two direct T3 hosts in distinct tabs; select each and grant scoped host permission. Verify disjoint projects/tasks/Runner status and correct linked-thread navigation; changes on the non-selected host must never mutate the selected host.
