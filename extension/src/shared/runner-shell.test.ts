@@ -74,7 +74,8 @@ test('portable runner command executes through the actual shell', () => {
     const isWindows = process.platform === 'win32';
     const child = isWindows
       ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-          env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8', timeout: 15000,
+          // Windows CI occasionally starts PowerShell/Node slowly; keep the live PTY timeout separate.
+          env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8', timeout: 45000,
         })
       : spawnSync('sh', ['-c', command], {
           env: { ...process.env, HOME: temp }, encoding: 'utf8', timeout: 15000,
