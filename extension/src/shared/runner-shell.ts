@@ -4,7 +4,7 @@
  * quoting, PATH-based global npm binaries, and Windows/POSIX differences.
  */
 export type RunnerVerb = 'install' | 'status' | 'start' | 'stop' | 'add' | 'remove';
-export const RUNNER_SOURCE_REF = '05094eb220e7110153b121b90ebee7f84cc7203b';
+export const RUNNER_SOURCE_REF = '5ae13b7b08e78668dfc5ffb290fc958cc00c6bf8';
 
 const PROGRAM = String.raw` 
 const request = __REQUEST__;
