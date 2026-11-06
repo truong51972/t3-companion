@@ -6,6 +6,6 @@
   "scripts": {
     "build:extension": "npm run build --workspace extension",
     "typecheck:extension": "npm run typecheck --workspace extension",
-    "test": "npm run test --workspace runner && node --experimental-strip-types --test extension/src/shared/*.test.ts"
+    "test": "npm run test --workspace runner && node --experimental-strip-types --test extension/src/shared/*.test.ts extension/src/bridge/*.test.ts"
   }
 }
