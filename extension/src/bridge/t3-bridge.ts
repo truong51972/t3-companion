@@ -72,6 +72,9 @@ export async function rpc<T>(tabId: number, method: string, payload: unknown, ti
     target: { tabId }, world: 'MAIN', args: [method, payload, timeoutMs],
     func: async (methodName: string, input: unknown, timeout: number) => {
       const socketUrl = new URL('/ws', location.origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:'));
+      // T3 Code v2 requires this protocol negotiation during the WebSocket upgrade.
+      // Without it the server returns HTTP 426 before authenticating RPC calls.
+      socketUrl.searchParams.set('orchestrationProtocol', '2');
       const socket = new WebSocket(socketUrl);
       const id = crypto.randomUUID();
       return new Promise<{ ok: boolean; value?: unknown; error?: string }>(resolve => {
