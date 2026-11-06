@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readableTerminalText, runnerShellCommand, RUNNER_SOURCE_REF } from './runner-shell.ts';
+import { readableTerminalText, runnerShellCommand, terminalSubmit, RUNNER_SOURCE_REF } from './runner-shell.ts';
 
 const MARKER = 'COMPANION_' + 'a'.repeat(32);
 function decode(command: string): string {
@@ -59,6 +59,34 @@ test('runner installation is pinned and only downloads the four required source 
 
 test('rejects invalid command marker', () => {
   assert.throws(() => runnerShellCommand('status', undefined, 'bad'), /marker/);
+});
+
+test('terminal submit uses PTY Enter (CR), not Line Feed (Ctrl+J)', () => {
+  const command = runnerShellCommand('status', undefined, MARKER);
+  assert.equal(terminalSubmit(command), command + '\r');
+  assert.ok(!terminalSubmit(command).endsWith('\n'));
+});
+
+test('portable runner command executes through the actual shell', () => {
+  const command = runnerShellCommand('status', undefined, MARKER);
+  const temp = mkdtempSync(path.join(os.tmpdir(), 'companion-shell-'));
+  try {
+    const isWindows = process.platform === 'win32';
+    const child = isWindows
+      ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+          env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8', timeout: 15000,
+        })
+      : spawnSync('sh', ['-c', command], {
+          env: { ...process.env, HOME: temp }, encoding: 'utf8', timeout: 15000,
+        });
+    assert.equal(child.status, 0, child.error?.message || child.stderr || child.stdout);
+    const line = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
+    assert.ok(line, child.stdout);
+    assert.equal(JSON.parse(line[1]).installed, false);
+    assert.ok(child.stdout.includes(MARKER + ':0'));
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test('strips noisy PTY control sequences from runner output', () => {
