@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask } from '../src/storage.ts';
 import { runRunner, status, requestStop } from '../src/runner.ts';
 async function sandbox(t: any) {
@@ -123,4 +125,16 @@ test('T3 adapter safely passes prompt via stdin and accepts JSON result', async 
     if (previous === undefined) delete process.env.T3_COMPANION_T3_BIN;
     else process.env.T3_COMPANION_T3_BIN = previous;
   }
+});
+
+test('cloned runner bin works directly with Node without npm link', async t => {
+  const { home } = await sandbox(t);
+  const bin = fileURLToPath(new URL('../bin/t3-runner.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [bin, 'status'], {
+    env: { ...process.env, T3_COMPANION_HOME: home }, encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const data = JSON.parse(result.stdout);
+  assert.equal(data.running, false);
+  assert.equal(data.home, home);
 });
