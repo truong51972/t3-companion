@@ -1,4 +1,5 @@
 import { isSafeOrigin, isT3Web, looksLikeT3 } from '../shared/t3-site';
+import { readableTerminalText, runnerShellCommand, type RunnerVerb } from '../shared/runner-shell';
 
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection?: { instanceId: string; model: string } | null };
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
@@ -153,10 +154,9 @@ export async function sendThread(tabId: number, threadId: string, prompt: string
 }
 
 /** Uses the T3 terminal only to run the installed t3-runner CLI; never keeps a runner alive through the terminal. */
-export async function runnerCommand(tabId: number, project: Project, hostThreadId: string, verb: 'status' | 'start' | 'stop' | 'add' | 'remove', target?: string): Promise<string> {
+export async function runnerCommand(tabId: number, project: Project, hostThreadId: string, verb: RunnerVerb, target?: string): Promise<string> {
   const id = crypto.randomUUID();
-  const literal = (v: string) => `'${v.replaceAll("'", "'\\''")}'`;
-  const command = `t3-runner ${verb}${target ? ` ${literal(target)}` : ''}`;
+  const command = runnerShellCommand(verb, target);
   const marker = `COMPANION_${crypto.randomUUID().replaceAll('-', '')}`;
   await rpc(tabId, 'terminal.open', { threadId: hostThreadId, terminalId: id, cwd: project.workspaceRoot });
   try {
@@ -174,11 +174,17 @@ export async function runnerCommand(tabId: number, project: Project, hostThreadI
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 350));
       const event = await rpc<any>(tabId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
-      const text = event?.snapshot?.history || event?.history || event?.data || '';
-      const m = String(text).match(new RegExp(`${marker}:(\\d+)`));
+      const text = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
+      const m = new RegExp(`${marker}:(\\d+)`).exec(text);
       if (m) {
-        if (m[1] !== '0') throw new Error(`Runner CLI exit ${m[1]}: ${String(text).slice(-1000)}`);
-        return String(text).slice(0, 4000);
+        const output = text.slice(0, m.index).slice(-4000).trim();
+        if (m[1] !== '0') {
+          if (m[1] === '127' && output.includes('T3_COMPANION_RUNNER_NOT_INSTALLED')) {
+            throw new Error('Runner is not installed on the T3 host. Open Runner → Quick setup to install it under ~/.t3/companion.');
+          }
+          throw new Error(`Runner CLI exit ${m[1]}: ${output.slice(-500)}`);
+        }
+        return output;
       }
     }
     throw new Error('Runner terminal command timed out. Inspect T3 terminal before retrying.');
