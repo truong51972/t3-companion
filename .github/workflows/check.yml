@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --no-audit --no-fund
-      - run: node --experimental-strip-types --test extension/src/shared/runner-shell.test.ts
+      - run: node --experimental-strip-types --test extension/src/shared/runner-shell.test.ts extension/src/shared/skill-shell.test.ts
+      - run: node --experimental-strip-types --test runner/test/skill-tasks.test.ts
       - run: npm run typecheck:extension
       - run: npm run build:extension
