@@ -39,18 +39,18 @@ Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment 
 
 1. Open a T3 thread in the environment and select the project in Companion.
 2. Open **Overview → Runner**. The Side Panel checks its status automatically.
-3. If missing, click **Install & Start Runner**. Companion downloads only the four Runner source files from a **pinned commit** into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\.t3\companion\`). No Git clone, npm install, global npm link, systemd or shell-specific setup is needed.
+3. If missing, click **Install & Start Runner**. Companion first fetches a fixed control adapter from a pinned commit, then installs the four pinned Runner source files into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\\.t3\\companion\\`). Existing Runner source files are retained. No Git clone, global npm link, service, or shell-specific setup is needed. A previously installed Runner without the adapter shows **Setup required**; choose **Set up Runner controls** once.
 4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
 Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
 Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host's execution environment, setup/start reports an error; install those prerequisites first.
 
-**Known MVP limitation — shell history:** T3's currently exposed terminal RPC operates a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a native non-interactive command-execution endpoint. Companion uses an isolated terminal session, but the host shell may still retain its internal Node commands in PowerShell/Bash/Zsh command history. The one-time installer can be lengthy; one-shot status checks use a smaller command. We intentionally do not delete or modify the user's shell history. This remains a limitation until a native headless command API is available.
+**Known MVP limitation — shell history:** T3's available terminal RPC uses a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a headless command endpoint. Companion invokes a short Node launcher for routine Runner actions and a fixed project-scoped `npx skills add` wrapper. Only target paths are encoded as inert base64url arguments; no executable JavaScript is base64-encoded or evaluated. The host shell may retain these commands in PowerShell/Bash/Zsh history; Companion never alters history.
 
 **Known browser limitation — Side Panel width:** Edge/Chromium owns the resizable Side Panel frame; extensions cannot read or set its width using `chrome.sidePanel`. Companion avoids redundant `setOptions()` calls, but switching away from a T3-enabled tab may still cause Edge to hide/recreate the tab-scoped panel and reset the resized width. This is not controlled by CSS or extension storage. A global/window-wide panel could change the lifecycle but would also change the T3-only visibility behavior.
 
-The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
+The Runner sources remain pinned to commit `5ae13b7b08e78668dfc5ffb290fc958cc00c6bf8`. The control adapter is separately pinned to commit `715b00ce618ab821ee308bd5566723b9782b521d`. This is a one-time bootstrap; future control updates require an explicit **Set up Runner controls** action (or a later update flow), not background downloads.
 
 ### Agent Skill — project-scoped, optional
 
