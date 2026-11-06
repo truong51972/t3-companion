@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, isRecognizedTab, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
-import { linkedThreadUrl } from '../shared/thread-navigation';
+import { activeTab, describeEnvironment, isRecognizedTab, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { isSafeOrigin, isT3Web } from '../shared/t3-site';
+import { environmentThreadUrl } from '../shared/environment-routing';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import '../shared/styles.css';
 import './sidepanel.css';
@@ -35,6 +36,12 @@ function App() {
   const [page, setPage] = useState<Page>('kanban');
   const [tabId, setTabId] = useState<number | null>(null);
   const [tabUrl, setTabUrl] = useState('');
+  const [environmentId, setEnvironmentId] = useState('');
+  const [environmentLabel, setEnvironmentLabel] = useState('');
+  const [manualTabId, setManualTabId] = useState<number | null>(null);
+  const [tabChoices, setTabChoices] = useState<chrome.tabs.Tab[]>([]);
+  const scopedKey = useRef('');
+  const refreshVersion = useRef(0);
   const [recognized, setRecognized] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,9 +73,9 @@ function App() {
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
 
-  const refreshShell = useCallback(async (id: number, url: string) => {
+  const refreshShell = useCallback(async (id: number, url: string, environmentId: string) => {
     const version = ++shellVersion.current;
-    const next = await shell(id);
+    const next = await shell(id, environmentId);
     if (version !== shellVersion.current) return;
     setProjects(next.projects); setThreads(next.threads);
     // Match a thread id from the authenticated shell to a complete URL segment.
@@ -80,66 +87,93 @@ function App() {
       return next.projects.some(p => p.id === old) ? old : next.projects[0]?.id || '';
     });
   }, []);
-  const refreshFiles = useCallback(async (id: number, project: Project) => {
+  const refreshFiles = useCallback(async (id: number, environmentId: string, project: Project) => {
     const version = ++filesVersion.current;
     const [nextTasks, nextRuntime] = await Promise.all([
-      readProjectJson<Tasks>(id, project.workspaceRoot, 'tasks.json', emptyTasks()),
-      readProjectJson<Runtime>(id, project.workspaceRoot, 'runtime.json', emptyRuntime()),
+      readProjectJson<Tasks>(id, environmentId, project.workspaceRoot, 'tasks.json', emptyTasks()),
+      readProjectJson<Runtime>(id, environmentId, project.workspaceRoot, 'runtime.json', emptyRuntime()),
     ]);
     const checkedTasks = validateTasks(nextTasks), checkedRuntime = validateRuntime(nextRuntime);
     if (version !== filesVersion.current) return;
     setTasks(checkedTasks); setRuntime(checkedRuntime);
   }, []);
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     setBusy(true); setError('');
     try {
-      const tab = await activeTab(); setTabId(tab.id || null); setTabUrl(tab.url || '');
-      const detected = await isRecognizedTab(tab); setRecognized(detected);
-      if (detected && tab.id) await refreshShell(tab.id, tab.url || '');
-    } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
-  }, [refreshShell]);
+      // Tabs only supply candidate addresses. Their server descriptors supply identities.
+      const [tabs, stored] = await Promise.all([
+        chrome.tabs.query({ currentWindow: true }), chrome.storage.local.get('verifiedOrigins'),
+      ]);
+      const verified = new Set(Array.isArray(stored.verifiedOrigins) ? stored.verifiedOrigins as string[] : []);
+      setTabChoices(tabs.filter(t => t.id !== undefined && t.url && isSafeOrigin(t.url) &&
+        (isT3Web(t.url) || verified.has(new URL(t.url).origin))));
+      const tab = manualTabId === null ? await activeTab() : await chrome.tabs.get(manualTabId);
+      if (!tab.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
+      const descriptor = await describeEnvironment(tab.id);
+      if (version !== refreshVersion.current) return;
+      const key = tab.id + ':' + descriptor.environmentId;
+      if (scopedKey.current !== key) {
+        scopedKey.current = key;
+        ++filesVersion.current; ++shellVersion.current;
+        manualProject.current = false;
+        setProjects([]); setThreads([]); setProjectId('');
+        setTasks(emptyTasks()); setRuntime(emptyRuntime());
+        setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked');
+      }
+      setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
+      setEnvironmentLabel(descriptor.label); setRecognized(true);
+      await refreshShell(tab.id, tab.url, descriptor.environmentId);
+    } catch (e) {
+      if (version !== refreshVersion.current) return;
+      ++filesVersion.current; ++shellVersion.current;
+      setRecognized(false); setProjects([]); setThreads([]); setProjectId('');
+      setTasks(emptyTasks()); setRuntime(emptyRuntime()); setRunnerResult('Not checked');
+      setEnvironmentId(''); setEnvironmentLabel(''); setTabId(null); scopedKey.current = '';
+      setError(String(e));
+    } finally { if (version === refreshVersion.current) setBusy(false); }
+  }, [manualTabId, refreshShell]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     filesVersion.current++;
     setTasks(emptyTasks()); setRuntime(emptyRuntime());
-    if (!tabId || !currentProject || !recognized) return;
+    if (!tabId || !environmentId || !currentProject || !recognized) return;
     let active = true;
-    void refreshFiles(tabId, currentProject).catch(e => { if (active) setError(String(e)); });
+    void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (active) setError(String(e)); });
     return () => { active = false; filesVersion.current++; };
-  }, [tabId, projectId, recognized, refreshFiles, currentProject]);
+  }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
-    const changed = () => void refresh();
-    const updated = (_id: number, change: { url?: string; status?: string }) => {
-      if (change.url || change.status === 'complete') void refresh();
+    const changed = () => { if (manualTabId === null) void refresh(); };
+    const updated = (id: number, change: { url?: string; status?: string }) => {
+      if ((manualTabId === null ? id === tabId : id === manualTabId) && (change.url || change.status === 'complete')) void refresh();
     };
     chrome.tabs.onActivated.addListener(changed);
     chrome.tabs.onUpdated.addListener(updated);
     return () => { chrome.tabs.onActivated.removeListener(changed); chrome.tabs.onUpdated.removeListener(updated); };
-  }, [refresh]);
+  }, [refresh, manualTabId, tabId]);
   useEffect(() => {
-    if (!tabId || !currentProject || !recognized || editing || queueTarget || busy) return;
+    if (!tabId || !environmentId || !currentProject || !recognized || editing || queueTarget || busy) return;
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshFiles(tabId, currentProject).catch(e => setError(String(e)));
+      if (document.visibilityState === 'visible') void refreshFiles(tabId, environmentId, currentProject).catch(e => setError(String(e)));
     }, 10000);
     return () => clearInterval(interval);
-  }, [tabId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
+  }, [tabId, environmentId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
   async function action(f: () => Promise<void>) {
-    if (!tabId || !currentProject) return;
+    if (!tabId || !environmentId || !currentProject) return;
     setBusy(true); setError(''); setNotice('');
-    try { await f(); await refreshFiles(tabId, currentProject); }
+    try { await f(); await refreshFiles(tabId, environmentId, currentProject); }
     catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }
   async function mutateTask(taskId: string, update: (old: Tasks) => Tasks, original?: Task) {
-    if (!tabId || !currentProject) return;
-    const fresh = validateTasks(await readProjectJson<Tasks>(tabId, currentProject.workspaceRoot, 'tasks.json', emptyTasks()));
+    if (!tabId || !environmentId || !currentProject) return;
+    const fresh = validateTasks(await readProjectJson<Tasks>(tabId, environmentId, currentProject.workspaceRoot, 'tasks.json', emptyTasks()));
     const current = fresh.tasks.find(t => t.id === taskId);
     if (original && JSON.stringify(original) !== JSON.stringify(current)) throw new Error('Task changed in another panel. Refresh before editing again.');
     const next = update(fresh);
     validateTasks(next);
-    await writeProjectJson(tabId, currentProject.workspaceRoot, 'tasks.json', next);
+    await writeProjectJson(tabId, environmentId, currentProject.workspaceRoot, 'tasks.json', next);
     setNotice('Saved to .t3/tasks.json');
   }
   function edit(task?: Task) { const value = task ? structuredClone(task) : blank(); setEditing(value); setDraft(value); }
@@ -169,13 +203,13 @@ function App() {
   const taskLinkedThread = (task: Task) => taskRequests(task)
     .map(item => item.execution?.threadId)
     .find((id): id is string => typeof id === 'string' && id.length > 0);
-  const threadUrl = (threadId: string) => linkedThreadUrl(tabUrl, threads.map(t => t.id), threadId);
+  const threadUrl = (threadId: string) => environmentThreadUrl(tabUrl, environmentId, threadId);
 
   async function openLinkedThread(threadId: string) {
     const url = threadUrl(threadId);
     if (!url || !tabId) return false;
     try {
-      await chrome.tabs.update(tabId, { url });
+      await chrome.tabs.update(tabId, { url, active: true });
       setDetailsTaskId(null);
       return true;
     } catch (e) {
@@ -192,10 +226,24 @@ function App() {
     if (!tabId || !currentProject) return;
     const host = visibleThreads[0]?.id;
     if (!host) throw new Error('Create a T3 session in this project first; Terminal RPC requires a host thread.');
-    const result = await runnerCommand(tabId, currentProject, host, verb,
+    const result = await runnerCommand(tabId, environmentId, currentProject, host, verb,
       ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
     setRunnerResult(result);
     setNotice(`Runner command: ${verb}`);
+  }
+  async function selectEnvironmentTab(value: string) {
+    if (value === 'auto') { setManualTabId(null); return; }
+    const id = Number(value);
+    const tab = tabChoices.find(t => t.id === id);
+    if (!tab?.url || !isSafeOrigin(tab.url)) return;
+    try {
+      // A per-origin permission grants MAIN-world execution on a non-active tab.
+      // This is permission to reach that site, not a T3 authentication credential.
+      const origin = new URL(tab.url).origin + '/*';
+      const granted = await chrome.permissions.request({ origins: [origin] });
+      if (!granted) throw new Error('Browser permission for the selected T3 host was declined.');
+      setManualTabId(id);
+    } catch (e) { setError(String(e)); }
   }
   return <main className="stack sidepanel">
     <header className="header">
@@ -205,6 +253,17 @@ function App() {
           <span className={'connection ' + (recognized ? 'connected' : 'disconnected')}><span className="status-dot"/>{recognized ? 'Detected' : 'Offline'}</span>
           <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh" disabled={busy} onClick={() => void refresh()}>↻</button>
         </div>
+      </div>
+      <div className="environment-row">
+        <label htmlFor="environment">Environment</label>
+        <select id="environment" aria-label="Environment" disabled={busy} value={manualTabId === null ? 'auto' : String(manualTabId)}
+          onChange={e => void selectEnvironmentTab(e.target.value)}>
+          <option value="auto">Follow active T3 tab</option>
+          {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
+            {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
+          </option>)}
+        </select>
+        {recognized && <span className="environment-name" title={environmentId}>{environmentLabel}</span>}
       </div>
       <div className="project-row">
         <label className="sr-only" htmlFor="project">Project</label>
@@ -223,7 +282,7 @@ function App() {
     {notice && <p className="notice success" role="status">{notice}</p>}
     {!recognized ? <section className="empty-view">
       <h2>Connect to T3 Code</h2>
-      <p className="muted">Open a T3 Code tab, then check the connection.</p>
+      <p className="muted">Use a T3 host tab serving this environment directly. T3 Connect environments shown only in app.t3.codes require an upstream integration API; Companion will not execute against the wrong host.</p>
       <button onClick={() => void refresh()}>Retry detection</button>
     </section>
     : !currentProject || tabId === null ? <section className="empty-view"><p>No projects found in this T3 environment.</p></section>
@@ -317,7 +376,7 @@ function App() {
             </div>
           ))}
           {detailsTask && taskLinkedThread(detailsTask) && !threadUrl(taskLinkedThread(detailsTask)!) &&
-            <p className="muted">To open linked threads directly, navigate T3 Code to an existing thread in this environment first.</p>}
+            <p className="muted">This thread cannot be opened safely from the selected environment.</p>}
           {detailsTask && taskRequests(detailsTask).some(({ execution }) => execution?.status === 'dispatching' && !execution.threadId) &&
             <p className="muted">Runner records a thread ID after the T3 CLI returns. An active execution may not have a link yet.</p>}
         </div>
