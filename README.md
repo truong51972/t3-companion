@@ -32,29 +32,20 @@ Choose a T3 project, manage tasks on the Kanban board, queue execution requests 
 
 **Link routing:** Companion selects the environment from the active T3 Web session and verifies its actual target server descriptor. It can open a linked thread from the host's home page; it never guesses the environment from a thread or moves a thread between hosts. The current Runner uses `t3 thread start --wait --json` and writes `threadId` only after the CLI returns. An in-progress execution may therefore appear without a clickable thread link.
 
-### Quick setup Runner on the **T3 environment host** (WSL / Linux)
+### Runner setup — Windows, WSL and Linux
 
-Requires **Node.js 22.16+** and the `t3` CLI on the same host as T3 Code. The Runner uses only Node built-ins; there is **no npm install, global npm link or shell PATH change**.
+Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment host.
 
-For the open PR #1 beta, clone its branch directly into the user-level T3 directory:
+1. Open a T3 thread in the environment and select the project in Companion.
+2. Open **Runner**. The Side Panel checks its status automatically.
+3. If missing, click **Install & Start Runner**. Companion downloads only the four Runner source files from a **pinned commit** into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\.t3\companion\`). No Git clone, npm install, global npm link, systemd or shell-specific setup is needed.
+4. If installed but stopped, the Side Panel automatically starts it and checks again every **15 seconds** while open. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
-```sh
-git clone -b feat/companion-runner-foundation https://github.com/truong51972/t3-companion.git ~/.t3/companion
-node ~/.t3/companion/runner/bin/t3-runner.mjs start
-```
+Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
-After merge, a regular `git clone https://github.com/truong51972/t3-companion.git ~/.t3/companion` can be used instead. If the directory already exists, use `git -C ~/.t3/companion pull --ff-only` rather than cloning again.
+Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host's execution environment, setup/start reports an error; install those prerequisites first.
 
-Use **Runner → Status / Register project** in the Side Panel to finish setup. Or verify from the host terminal:
-
-```sh
-node ~/.t3/companion/runner/bin/t3-runner.mjs status
-node ~/.t3/companion/runner/bin/t3-runner.mjs add /absolute/project/path
-```
-
-`~/.t3/companion/` contains the **cloned source**, while `~/.t3/runner/` remains the Runner's **data directory** (`projects.json`, log, lock). The extension invokes the script from the stable clone path if it exists, falling back to an existing global `t3-runner` command. This avoids the `zsh: command not found: t3-runner` error seen when the T3 terminal has a different npm global `PATH`.
-
-Runner is detached and remains active after closing the browser/Side Panel, but does not automatically start after a WSL reboot. T3 itself must be available for dispatch; check `command -v node` and `command -v t3` in the **same environment** if execution fails. For optional reboot startup, use `systemd --user` later. See [file contract](docs/file-contract.md).
+The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
 
 ### One-pass browser acceptance checklist
 
@@ -65,8 +56,8 @@ Runner is detached and remains active after closing the browser/Side Panel, but 
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
 7. Click a task without a recorded thread: Task Details should show its prompt and history. For a task with a recorded `threadId`, click it even from the host's home page: the selected verified T3 tab should navigate to the linked environment/thread route. Verify an older execution is available from Task Details.
-8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread in that project, opened through T3 Code itself, and `t3-runner` available on the host.
-9. Close browser; confirm `t3-runner status` on WSL still reports running, and the Runner continues dispatch.
+8. From Runner, check Status/Start/Stop/Register/Unregister. Requires at least one T3 thread on that environment host and the Node.js prerequisite.
+9. Close browser; confirm Runner continues dispatching. Reopen the Side Panel and verify status polling and automatic restart if stopped.
 10. Restart the Runner after interrupted work; confirm orphan `dispatching` becomes `needs_reconciliation`, never automatically relaunched.
 11. Verify Check Updates/View Releases in the popup, and test on Edge and Chrome.
 12. Open two direct T3 hosts in distinct tabs; select each and grant scoped host permission. Verify disjoint projects/tasks/Runner status and correct linked-thread navigation; changes on the non-selected host must never mutate the selected host.
