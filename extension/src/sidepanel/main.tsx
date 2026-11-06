@@ -87,13 +87,14 @@ function App() {
   const visibleRequestIds = new Set(tasks.tasks.flatMap(task => (task.executionRequests || []).map(request => request.requestId)));
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
+  const runnerBridgeMissing = /"bridgeMissing"\s*:\s*true/.test(runnerResult);
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   const runnerError = runnerResult.startsWith('Runner check failed: ') ? runnerResult.slice('Runner check failed: '.length) : '';
   const runnerHost = threads.find(t => projects.some(p => p.id === t.projectId));
   const runnerHostProject = runnerHost && projects.find(p => p.id === runnerHost.projectId);
   const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
   const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
-  const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerInstalled === 'false'
+  const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
@@ -273,8 +274,8 @@ function App() {
         runnerActionInFlight.current = true;
         const output = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'status');
         if (!active || scopedKey.current !== scope) return;
-        const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
-        if (status.installed && !status.running && enabled && runnerAutoStartRef.current) {
+        const status = JSON.parse(output) as { installed?: boolean; running?: boolean; bridgeMissing?: boolean };
+        if (status.installed && !status.bridgeMissing && !status.running && enabled && runnerAutoStartRef.current) {
           const started = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'start');
           if (active && scopedKey.current === scope) setRunnerResult(started);
         } else {
@@ -407,7 +408,7 @@ function App() {
     const key = scopedKey.current;
     runnerActionInFlight.current = true;
     try {
-      // Manual Stop must not be undone by the polling loop.
+      // Respect manual Stop by disabling future one-shot auto-start.
       if (verb === 'stop' || verb === 'start' || verb === 'install') {
         const enabled = verb !== 'stop';
         runnerAutoStartRef.current = enabled;
@@ -625,9 +626,9 @@ function App() {
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
         <div className="runner-toolbar">
-          {runnerInstalled === 'false' && <button className="primary" disabled={busy || !runnerHostAvailable}
-            onClick={() => void action(async () => manageRunner('install'))}>Install & Start</button>}
-          {runnerInstalled === 'true' && runnerRunning === 'false' && <button className="primary"
+          {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
+            onClick={() => void action(async () => manageRunner('install'))}>{runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up Runner controls' : 'Install & Start'}</button>}
+          {runnerInstalled === 'true' && !runnerBridgeMissing && runnerRunning === 'false' && <button className="primary"
             disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
           {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
