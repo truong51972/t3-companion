@@ -1,11 +1,5 @@
 /** Portable project-scoped skill installer. Status checks use projects.readFile, not a terminal. */
-export const SKILL_PATHS = [
-  '.agents/skills/t3-companion/SKILL.md',
-  '.claude/skills/t3-companion/SKILL.md',
-  '.opencode/skills/t3-companion/SKILL.md',
-  '.cursor/skills/t3-companion/SKILL.md',
-  '.codex/skills/t3-companion/SKILL.md',
-] as const;
+export const SKILL_PATH = '.agents/skills/t3-companion/SKILL.md' as const;
 
 const PROGRAM = String.raw`
 const request = __REQUEST__, marker = __MARKER__;
