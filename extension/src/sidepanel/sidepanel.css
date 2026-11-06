@@ -1,6 +1,6 @@
 #root{min-width:0}
 .sidepanel{display:flex;flex-direction:column;gap:0;height:100dvh;min-width:0;overflow:hidden;background:#131416}
-.header{flex-shrink:0;background:#151619;border-bottom:1px solid #2d2e32;padding:7px 12px 8px;display:grid;gap:7px}
+.header{flex-shrink:0;background:#151619;padding:7px 12px 8px;display:grid;gap:7px}
 .header-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
 .brand,.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .brand strong{font-size:12px;font-weight:650;letter-spacing:-.2px}
@@ -14,10 +14,12 @@
 
 
 
-.header .nav{display:flex;gap:2px;align-items:center;flex-shrink:0;padding:2px;background:#1f2024;border:1px solid #2c2e32;border-radius:6px}
-.header .nav button{flex:0 0 auto;background:transparent;border:0;border-radius:4px;padding:4px 8px;color:#a0a2a8;font-size:11px;line-height:16px}
-.header .nav button:hover:not(:disabled){background:#303137;color:#e4e5e6}
-.header .nav button.selected{background:#393b41;color:#f2f2f4;font-weight:600}
+/* Standalone section tabs below the full header (workspace selectors included). */
+.section-tabs{display:flex;align-items:stretch;gap:16px;flex-shrink:0;padding:0 14px;min-height:35px;background:#151619;border-bottom:1px solid #303236}
+.section-tabs button{flex:0 0 auto;padding:8px 4px 7px;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;color:#9699a1;font-size:12px;line-height:18px}
+.section-tabs button:hover:not(:disabled){background:transparent;border-color:transparent;color:#e4e5e7}
+.section-tabs button.selected,.section-tabs button.selected:hover{background:transparent;border-bottom-color:#a6b8df;color:#f0f1f4;font-weight:600}
+.section-tabs button:focus-visible{outline-offset:-2px}
 .sidepanel>section{display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto;padding:0}
 .view-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;padding:14px 16px 12px}
 .view-title{display:flex;align-items:center;gap:10px}.view-title h2{font-size:15px}.view-title .muted{font-size:12px}
@@ -127,4 +129,4 @@ button.compact{padding:6px 10px}
 .context-field>span{font-size:9px;line-height:11px;color:#8f9299;font-weight:560;letter-spacing:.02em}
 .sidepanel .context-field select{display:block;width:100%;height:27px;min-height:27px;min-width:0;max-width:100%;padding:3px 20px 3px 7px;border-radius:5px;border-color:#37393f;background-color:#222329;font-size:11px;line-height:18px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
 .sidepanel .context-field select:focus-visible{outline-offset:1px}
-@media(max-width:320px){.brand strong{display:none}.header{padding-left:9px;padding-right:9px}.header .nav button{padding:4px 7px}.context-row{gap:4px}.sidepanel .context-field select{padding-left:5px;font-size:10px}}
+@media(max-width:320px){.brand strong{display:none}.header{padding-left:9px;padding-right:9px}.context-row{gap:4px}.sidepanel .context-field select{padding-left:5px;font-size:10px}}
