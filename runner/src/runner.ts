@@ -67,7 +67,7 @@ export const executeT3: Execute = async (project, task, request) => {
       let response: any;
       try { response = JSON.parse(text); }
       catch { response = { error: err || text.trim() || `T3 exit ${code}` }; }
-      const status = code === 2 || response.status === 'waiting' ? 'blocked' :
+      const status = code === 2 && response.status === 'waiting' ? 'blocked' :
         code === 0 && response.status === 'completed' ? 'completed' : 'failed';
       resolve({ status, threadId: response.threadId || null, runId: response.runId || null,
         reply: response.reply ?? null, error: response.error || (status === 'failed' ? err || `T3 exit ${code}` : null) });
