@@ -282,8 +282,9 @@ function App() {
   }
   async function manageRunner(verb: 'install' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
     if (!tabId || !currentProject) return;
-    const host = visibleThreads[0]?.id;
-    if (!host) throw new Error('Create a T3 session in this project first; Terminal RPC requires a host thread.');
+    const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
+    const hostProject = host && projects.find(p => p.id === host.projectId);
+    if (!host || !hostProject) throw new Error('Open a T3 thread in this environment first; Terminal RPC requires a host thread.');
     const key = scopedKey.current;
     // Stop disables automatic restart until Start / Install is requested again.
     if (verb === 'stop' || verb === 'start' || verb === 'install') {
@@ -291,7 +292,7 @@ function App() {
       await chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
       setRunnerAutoStart(enabled);
     }
-    const result = await runnerCommand(tabId, environmentId, currentProject, host, verb,
+    const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
       ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
     if (scopedKey.current === key) {
       setRunnerResult(result);
@@ -419,10 +420,10 @@ function App() {
       <div className="runner-section">
         {runnerInstalled === 'false' ? <>
           <p className="muted">Install the standalone Runner on this T3 environment with Node.js 22.16+; no Git clone or global npm install required.</p>
-          <button disabled={busy || !visibleThreads.length} onClick={() => void action(async () => manageRunner('install'))}>Install & Start Runner</button>
+          <button disabled={busy || !threads.length} onClick={() => void action(async () => manageRunner('install'))}>Install & Start Runner</button>
         </> : <>
           <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
-            <button disabled={busy || !visibleThreads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
+            <button disabled={busy || !threads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
               {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
             </button>)}</div>
           <label className="muted"><input type="checkbox" checked={runnerAutoStart} disabled={!environmentId} onChange={event => {
@@ -431,7 +432,7 @@ function App() {
             void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
           }}/> Auto-start while Side Panel is open</label>
         </>}
-        {!visibleThreads.length && <p className="muted">Open a T3 session in this project to enable Runner commands.</p>}
+        {!threads.length && <p className="muted">Open a T3 session in this environment to enable Runner commands.</p>}
         <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
       </div>
     </section>}
