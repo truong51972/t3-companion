@@ -68,12 +68,19 @@ function App() {
   const [worktree, setWorktree] = useState('');
   const [runnerResult, setRunnerResult] = useState('Not checked');
   const [runnerAutoStart, setRunnerAutoStart] = useState(true);
+  const runnerAutoStartRef = useRef(true);
+  const runnerActionInFlight = useRef(false);
   const currentProject = useMemo(() => projects.find(p => p.id === projectId) || null, [projects, projectId]);
   const visibleThreads = threads.filter(t => t.projectId === projectId);
   const detailsTask = tasks.tasks.find(t => t.id === detailsTaskId) || null;
   const runnerRunning = /"running"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerInstalled = /"installed"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
   const runnerPid = /"pid"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
+  const runnerError = runnerResult.startsWith('Runner check failed: ') ? runnerResult.slice('Runner check failed: '.length) : '';
+  const runnerHostAvailable = threads.some(t => projects.some(p => p.id === t.projectId));
+  const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
+  const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerInstalled === 'false'
+    ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
@@ -186,16 +193,16 @@ function App() {
     let active = true;
     let checking = false;
     const check = async () => {
-      if (checking || !active) return;
+      if (checking || !active || runnerActionInFlight.current) return;
       checking = true;
       try {
         const saved = await chrome.storage.local.get(flag);
         const enabled = saved[flag] !== true;
-        if (active && scopedKey.current === scope) setRunnerAutoStart(enabled);
+        if (active && scopedKey.current === scope) { runnerAutoStartRef.current = enabled; setRunnerAutoStart(enabled); }
         const output = await runnerCommand(tabId, environmentId, hostProject, host.id, 'status');
         const status = JSON.parse(output) as { installed?: boolean; running?: boolean };
         if (!active || scopedKey.current !== scope) return;
-        if (status.installed && !status.running && enabled) {
+        if (status.installed && !status.running && enabled && runnerAutoStartRef.current && !runnerActionInFlight.current) {
           const started = await runnerCommand(tabId, environmentId, hostProject, host.id, 'start');
           if (active && scopedKey.current === scope) setRunnerResult(started);
         } else {
@@ -286,17 +293,26 @@ function App() {
     const hostProject = host && projects.find(p => p.id === host.projectId);
     if (!host || !hostProject) throw new Error('Open a T3 thread in this environment first; Terminal RPC requires a host thread.');
     const key = scopedKey.current;
-    // Stop disables automatic restart until Start / Install is requested again.
-    if (verb === 'stop' || verb === 'start' || verb === 'install') {
-      const enabled = verb !== 'stop';
-      await chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
-      setRunnerAutoStart(enabled);
-    }
-    const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
-      ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
-    if (scopedKey.current === key) {
-      setRunnerResult(result);
-      setNotice(`Runner command: ${verb}`);
+    runnerActionInFlight.current = true;
+    try {
+      // Manual Stop must not be undone by the polling loop.
+      if (verb === 'stop' || verb === 'start' || verb === 'install') {
+        const enabled = verb !== 'stop';
+        runnerAutoStartRef.current = enabled;
+        await chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
+        if (scopedKey.current === key) setRunnerAutoStart(enabled);
+      }
+      const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
+        ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
+      if (scopedKey.current === key) {
+        setRunnerResult(result);
+        if (verb !== 'status') setNotice('Runner: ' + verb);
+      }
+    } catch (err) {
+      if (scopedKey.current === key) setRunnerResult('Runner check failed: ' + String(err));
+      throw err;
+    } finally {
+      runnerActionInFlight.current = false;
     }
   }
   async function selectEnvironmentTab(value: string) {
@@ -416,24 +432,46 @@ function App() {
       </div>
     </section>
     : <section className="runner-view">
-      <div className="view-header"><div className="view-title"><h2>Runner</h2><span className={"runner-state " + (runnerRunning === "true" ? "running" : runnerRunning === "false" ? "stopped" : "")}>{runnerInstalled === "false" ? "Not installed" : runnerRunning === "true" ? "Running" : runnerRunning === "false" ? "Stopped" : "Checking"}{runnerPid ? " · PID " + runnerPid : ""}</span></div></div>
+      <div className="view-header runner-heading">
+        <div className="view-title"><h2>Runner</h2>
+          <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')} title={runnerError || undefined}>
+            {runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}
+          </span>
+        </div>
+        <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
+          disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻</button>
+      </div>
       <div className="runner-section">
-        {runnerInstalled === 'false' ? <>
-          <p className="muted">Install the standalone Runner on this T3 environment with Node.js 22.16+; no Git clone or global npm install required.</p>
-          <button disabled={busy || !threads.length} onClick={() => void action(async () => manageRunner('install'))}>Install & Start Runner</button>
-        </> : <>
-          <div className="runner-controls">{(['status','start','stop','add','remove'] as const).map(verb =>
-            <button disabled={busy || !threads.length} key={verb} onClick={() => void action(async () => manageRunner(verb))}>
-              {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
-            </button>)}</div>
-          <label className="muted"><input type="checkbox" checked={runnerAutoStart} disabled={!environmentId} onChange={event => {
-            const enabled = event.target.checked;
-            setRunnerAutoStart(enabled);
-            void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
-          }}/> Auto-start while Side Panel is open</label>
-        </>}
-        {!threads.length && <p className="muted">Open a T3 session in this environment to enable Runner commands.</p>}
-        <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
+        {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
+        {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
+        <div className="runner-toolbar">
+          {runnerInstalled === 'false' && <button className="primary" disabled={busy || !runnerHostAvailable}
+            onClick={() => void action(async () => manageRunner('install'))}>Install & Start</button>}
+          {runnerInstalled === 'true' && runnerRunning === 'false' && <button className="primary"
+            disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
+          {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
+            onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
+          {runnerInstalled === 'true' && <details className="runner-more">
+            <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
+            <div className="runner-menu">
+              <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('add'))}>Register current project</button>
+              <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('remove'))}>Unregister current project</button>
+            </div>
+          </details>}
+          {runnerInstalled === 'true' && <label className="runner-autostart">
+            <input type="checkbox" checked={runnerAutoStart} disabled={!environmentId}
+              onChange={event => {
+                const enabled = event.target.checked;
+                runnerAutoStartRef.current = enabled;
+                setRunnerAutoStart(enabled);
+                void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
+              }}/>
+            <span>Auto-start</span>
+          </label>}
+        </div>
+        <details className="runner-output"><summary>Diagnostics</summary>
+          <pre className="runner-result">{runnerResult}</pre>
+        </details>
       </div>
     </section>}
     <dialog ref={detailsDialog} className="modal" onClose={() => setDetailsTaskId(null)}>
