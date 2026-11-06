@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { activeTab, describeEnvironment, isRecognizedTab, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { activeTab, describeEnvironment, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
 import { isSafeOrigin, isT3Web } from '../shared/t3-site';
 import { environmentThreadUrl } from '../shared/environment-routing';
 import type { Project, Thread } from '../bridge/t3-bridge';
+import type { SessionEnvironment } from '../bridge/page-session';
 import '../shared/styles.css';
 import './sidepanel.css';
 
@@ -40,6 +41,8 @@ function App() {
   const [environmentLabel, setEnvironmentLabel] = useState('');
   const [manualTabId, setManualTabId] = useState<number | null>(null);
   const [tabChoices, setTabChoices] = useState<chrome.tabs.Tab[]>([]);
+  const [sessionEnvironments, setSessionEnvironments] = useState<SessionEnvironment[]>([]);
+  const [manualEnvironmentId, setManualEnvironmentId] = useState('');
   const scopedKey = useRef('');
   const refreshVersion = useRef(0);
   const [recognized, setRecognized] = useState(false);
@@ -113,7 +116,11 @@ function App() {
         (isT3Web(t.url) || verified.has(new URL(t.url).origin))));
       const tab = manualTabId === null ? await activeTab() : await chrome.tabs.get(manualTabId);
       if (!tab.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
-      const descriptor = await describeEnvironment(tab.id);
+      // The selected T3 tab can contain multiple authenticated remote environments.
+      const session = await listSessionEnvironments(tab.id);
+      if (version !== refreshVersion.current) return;
+      setSessionEnvironments(session.environments);
+      const descriptor = await describeEnvironment(tab.id, manualEnvironmentId);
       if (version !== refreshVersion.current) return;
       const key = tab.id + ':' + descriptor.environmentId;
       if (scopedKey.current !== key) {
@@ -135,7 +142,7 @@ function App() {
       setEnvironmentId(''); setEnvironmentLabel(''); setTabId(null); scopedKey.current = ''; setNotice('');
       setError(String(e));
     } finally { if (version === refreshVersion.current) setBusy(false); }
-  }, [manualTabId, refreshShell]);
+  }, [manualTabId, manualEnvironmentId, refreshShell]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     filesVersion.current++;
@@ -246,7 +253,7 @@ function App() {
     }
   }
   async function selectEnvironmentTab(value: string) {
-    if (value === 'auto') { setManualTabId(null); return; }
+    if (value === 'auto') { setManualTabId(null); setManualEnvironmentId(''); return; }
     const id = Number(value);
     const tab = tabChoices.find(t => t.id === id);
     if (!tab?.url || !isSafeOrigin(tab.url)) return;
@@ -258,6 +265,7 @@ function App() {
       const granted = await chrome.permissions.request({ origins: [origin] });
       if (!granted) throw new Error('Browser permission for the selected T3 host was declined.');
       setManualTabId(id);
+      setManualEnvironmentId('');
     } catch (e) { setError(String(e)); }
   }
   return <main className="stack sidepanel">
@@ -270,7 +278,7 @@ function App() {
         </div>
       </div>
       <div className="environment-row">
-        <label htmlFor="environment">Environment</label>
+        <label htmlFor="environment">T3 tab</label>
         <select id="environment" aria-label="Environment" disabled={busy} value={manualTabId === null ? 'auto' : String(manualTabId)}
           onChange={e => void selectEnvironmentTab(e.target.value)}>
           <option value="auto">Follow active T3 tab</option>
@@ -279,6 +287,17 @@ function App() {
           </option>)}
         </select>
         {recognized && <span className="environment-name" title={environmentId}>{environmentLabel}</span>}
+      </div>
+      <div className="environment-row">
+        <label htmlFor="session-environment">Environment</label>
+        <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
+          value={manualEnvironmentId || 'auto'}
+          onChange={e => setManualEnvironmentId(e.target.value === 'auto' ? '' : e.target.value)}>
+          <option value="auto">Follow T3 thread</option>
+          {sessionEnvironments.map(env => <option key={env.environmentId} value={env.environmentId}>
+            {env.label} · {env.source === 'direct' ? 'Direct' : 'T3 session'}
+          </option>)}
+        </select>
       </div>
       <div className="project-row">
         <label className="sr-only" htmlFor="project">Project</label>
@@ -297,7 +316,7 @@ function App() {
     {notice && <p className="notice success" role="status">{notice}</p>}
     {!recognized ? <section className="empty-view">
       <h2>Connect to T3 Code</h2>
-      <p className="muted">Use a T3 host tab serving this environment directly. T3 Connect environments shown only in app.t3.codes require an upstream integration API; Companion will not execute against the wrong host.</p>
+      <p className="muted">Open a T3 Web tab with an authenticated environment. Companion uses that tab's existing session; on the T3 home page, select an environment above.</p>
       <button onClick={() => void refresh()}>Retry detection</button>
     </section>
     : !currentProject || tabId === null ? <section className="empty-view"><p>No projects found in this T3 environment.</p></section>
