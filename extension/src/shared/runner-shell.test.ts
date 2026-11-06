@@ -11,9 +11,8 @@ test('prefers the user-level runner clone while preserving global CLI fallback',
 
 test('quotes project paths as shell data, not commands', () => {
   const cmd = runnerShellCommand('add', "/home/user/projects/my 'repo' $(touch /tmp/pwn)");
-  assert.match(cmd, /'my '\\''repo'\\''/);
+  assert.ok(cmd.includes("my '\\''repo'\\'' $(touch /tmp/pwn)'"));
   assert.equal((cmd.match(/\$\(touch /g) || []).length, 2);
-  assert.ok(cmd.includes("'$(touch /tmp/pwn)'"));
 });
 
 test('strips noisy PTY control sequences from runner output', () => {
