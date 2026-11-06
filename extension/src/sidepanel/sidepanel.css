@@ -72,6 +72,8 @@ button.compact{padding:6px 10px}
 .session-status{font-size:11px;color:var(--muted)}
 .session-compose{display:grid;align-content:start;gap:9px}
 .form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.runner-state{font-size:11px;color:#8e9197}
+.runner-state.running{color:#91bea1}.runner-state.stopped{color:#d4aa87}
 .runner-section{display:grid;align-content:start;gap:14px;padding:0 16px}
 .runner-controls{display:flex;gap:8px;flex-wrap:wrap}.runner-controls button{flex:0 0 auto}
 .runner-output{border-top:1px solid var(--border);padding-top:10px}
