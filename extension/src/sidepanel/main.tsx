@@ -454,8 +454,8 @@ function App() {
           {runnerInstalled === 'true' && <details className="runner-more">
             <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
             <div className="runner-menu">
-              <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('add'))}>Register current project</button>
-              <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('remove'))}>Unregister current project</button>
+              <button disabled={busy || !runnerHostAvailable} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void action(async () => manageRunner('add')); }}>Register current project</button>
+              <button disabled={busy || !runnerHostAvailable} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void action(async () => manageRunner('remove')); }}>Unregister current project</button>
             </div>
           </details>}
           {runnerInstalled === 'true' && <label className="runner-autostart">
