@@ -88,13 +88,16 @@ function App() {
     });
   }, []);
   const refreshFiles = useCallback(async (id: number, environmentId: string, project: Project) => {
+    const key = id + ':' + environmentId;
+    // An older action must not invalidate or overwrite a newer environment's data.
+    if (scopedKey.current !== key) return;
     const version = ++filesVersion.current;
     const [nextTasks, nextRuntime] = await Promise.all([
       readProjectJson<Tasks>(id, environmentId, project.workspaceRoot, 'tasks.json', emptyTasks()),
       readProjectJson<Runtime>(id, environmentId, project.workspaceRoot, 'runtime.json', emptyRuntime()),
     ]);
     const checkedTasks = validateTasks(nextTasks), checkedRuntime = validateRuntime(nextRuntime);
-    if (version !== filesVersion.current) return;
+    if (version !== filesVersion.current || scopedKey.current !== key) return;
     setTasks(checkedTasks); setRuntime(checkedRuntime);
   }, []);
   const refresh = useCallback(async () => {
@@ -119,7 +122,7 @@ function App() {
         manualProject.current = false;
         setProjects([]); setThreads([]); setProjectId('');
         setTasks(emptyTasks()); setRuntime(emptyRuntime());
-        setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked');
+        setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
       }
       setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
       setEnvironmentLabel(descriptor.label); setRecognized(true);
@@ -129,7 +132,7 @@ function App() {
       ++filesVersion.current; ++shellVersion.current;
       setRecognized(false); setProjects([]); setThreads([]); setProjectId('');
       setTasks(emptyTasks()); setRuntime(emptyRuntime()); setRunnerResult('Not checked');
-      setEnvironmentId(''); setEnvironmentLabel(''); setTabId(null); scopedKey.current = '';
+      setEnvironmentId(''); setEnvironmentLabel(''); setTabId(null); scopedKey.current = ''; setNotice('');
       setError(String(e));
     } finally { if (version === refreshVersion.current) setBusy(false); }
   }, [manualTabId, refreshShell]);
@@ -139,7 +142,8 @@ function App() {
     setTasks(emptyTasks()); setRuntime(emptyRuntime());
     if (!tabId || !environmentId || !currentProject || !recognized) return;
     let active = true;
-    void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (active) setError(String(e)); });
+    const key = scopedKey.current;
+    void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (active && scopedKey.current === key) setError(String(e)); });
     return () => { active = false; filesVersion.current++; };
   }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
@@ -154,17 +158,23 @@ function App() {
   useEffect(() => {
     if (!tabId || !environmentId || !currentProject || !recognized || editing || queueTarget || busy) return;
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshFiles(tabId, environmentId, currentProject).catch(e => setError(String(e)));
+      if (document.visibilityState === 'visible') {
+        const key = scopedKey.current;
+        void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (scopedKey.current === key) setError(String(e)); });
+      }
     }, 10000);
     return () => clearInterval(interval);
   }, [tabId, environmentId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
   useEffect(() => { setDetailsTaskId(null); }, [projectId]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
+    const key = scopedKey.current;
     setBusy(true); setError(''); setNotice('');
-    try { await f(); await refreshFiles(tabId, environmentId, currentProject); }
-    catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+    try {
+      await f();
+      if (scopedKey.current === key) await refreshFiles(tabId, environmentId, currentProject);
+    } catch (e) { if (scopedKey.current === key) setError(String(e)); }
+    finally { if (scopedKey.current === key) setBusy(false); }
   }
   async function mutateTask(taskId: string, update: (old: Tasks) => Tasks, original?: Task) {
     if (!tabId || !environmentId || !currentProject) return;
@@ -173,8 +183,9 @@ function App() {
     if (original && JSON.stringify(original) !== JSON.stringify(current)) throw new Error('Task changed in another panel. Refresh before editing again.');
     const next = update(fresh);
     validateTasks(next);
+    const key = scopedKey.current;
     await writeProjectJson(tabId, environmentId, currentProject.workspaceRoot, 'tasks.json', next);
-    setNotice('Saved to .t3/tasks.json');
+    if (scopedKey.current === key) setNotice('Saved to .t3/tasks.json');
   }
   function edit(task?: Task) { const value = task ? structuredClone(task) : blank(); setEditing(value); setDraft(value); }
   function requestExecution(task: Task) { setSchedule(''); setWorktree(''); setQueueTarget(task); }
@@ -226,10 +237,13 @@ function App() {
     if (!tabId || !currentProject) return;
     const host = visibleThreads[0]?.id;
     if (!host) throw new Error('Create a T3 session in this project first; Terminal RPC requires a host thread.');
+    const key = scopedKey.current;
     const result = await runnerCommand(tabId, environmentId, currentProject, host, verb,
       ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
-    setRunnerResult(result);
-    setNotice(`Runner command: ${verb}`);
+    if (scopedKey.current === key) {
+      setRunnerResult(result);
+      setNotice(`Runner command: ${verb}`);
+    }
   }
   async function selectEnvironmentTab(value: string) {
     if (value === 'auto') { setManualTabId(null); return; }
