@@ -68,7 +68,7 @@ function App() {
     setProjects(next.projects); setThreads(next.threads);
     // Match a thread id from the authenticated shell to a complete URL segment.
     // The URL is an orientation hint, not authentication or a DOM-based guess.
-    const segments = new URL(url).pathname.split('/');
+    const segments = url ? new URL(url).pathname.split('/') : [];
     const activeThread = next.threads.find(t => segments.includes(t.id));
     setProjectId(old => {
       if (!manualProject.current && activeThread && next.projects.some(p => p.id === activeThread.projectId)) return activeThread.projectId;
@@ -105,7 +105,7 @@ function App() {
   }, [tabId, projectId, recognized, refreshFiles, currentProject]);
   useEffect(() => {
     const changed = () => void refresh();
-    const updated = (_id: number, change: chrome.tabs.TabChangeInfo) => {
+    const updated = (_id: number, change: { url?: string; status?: string }) => {
       if (change.url || change.status === 'complete') void refresh();
     };
     chrome.tabs.onActivated.addListener(changed);
@@ -119,6 +119,7 @@ function App() {
     }, 10000);
     return () => clearInterval(interval);
   }, [tabId, currentProject, recognized, editing, queueTarget, busy, refreshFiles]);
+  useEffect(() => { setSelectedThread(''); }, [projectId]);
   async function action(f: () => Promise<void>) {
     if (!tabId || !currentProject) return;
     setBusy(true); setError(''); setNotice('');
@@ -159,7 +160,7 @@ function App() {
   async function newThread() {
     if (!tabId || !currentProject || !sessionPrompt.trim()) return;
     const id = await launchThread(tabId, currentProject, sessionPrompt.trim(), visibleThreads[0]?.modelSelection);
-    setSelectedThread(id); setSessionPrompt(''); await refreshShell(tabId);
+    setSelectedThread(id); setSessionPrompt(''); await refreshShell(tabId, tabUrl);
     setNotice(`T3 thread started: ${id}`);
   }
   async function messageThread() {
@@ -281,7 +282,7 @@ function App() {
             {verb === 'add' ? 'Register project' : verb === 'remove' ? 'Unregister project' : verb[0].toUpperCase() + verb.slice(1)}
           </button>)}</div>
         {!visibleThreads.length && <p className="muted">Create a T3 session in this project to enable terminal commands.</p>}
-        <details className="runner-output"><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
+        <details className="runner-output" open={runnerResult !== 'Not checked'}><summary>Command output</summary><pre className="runner-result">{runnerResult}</pre></details>
       </div>
     </section>}
     <dialog ref={editorDialog} className="modal" onClose={() => setEditing(null)}>
