@@ -45,6 +45,8 @@ Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\
 
 Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host's execution environment, setup/start reports an error; install those prerequisites first.
 
+**Known MVP limitation — shell history:** T3's currently exposed terminal RPC operates a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a native non-interactive command-execution endpoint. Companion uses an isolated terminal session, but the host shell may still retain its internal Node commands in PowerShell/Bash/Zsh command history. The one-time installer can be lengthy; status polling uses a smaller command. We intentionally do not delete or modify the user's shell history. This remains a limitation until a native headless command API is available.
+
 The installer is intentionally version-pinned to the implementation included in PR #1, not `main` or a moving release. A later explicit update flow can replace this minimal bootstrap.
 
 ### One-pass browser acceptance checklist
