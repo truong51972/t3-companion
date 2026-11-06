@@ -515,16 +515,37 @@ function App() {
         })}</div>
       </div>
     </section>
-    : <section className="runner-view">
-      <div className="view-header runner-heading">
-        <div className="view-title"><h2>Runner</h2>
-          <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')} title={runnerError || undefined}>
-            {runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}
-          </span>
-        </div>
-        <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
-          disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻</button>
+    : <section className="overview-view">
+      <div className="view-header">
+        <div className="view-title"><h2>Overview</h2><span className="muted">{currentProject.title}</span></div>
       </div>
+      <div className="overview-content">
+        <div className="overview-metrics">
+          {[
+            { label: 'Tasks', value: tasks.tasks.length },
+            { label: 'Queued', value: tasks.tasks.reduce((sum, task) => sum +
+              (task.executionRequests || []).filter(request => !runtime.requests[request.requestId]).length, 0) },
+            { label: 'Running', value: Object.values(runtime.requests).filter(entry => entry.status === 'dispatching').length },
+            { label: 'Attention', value: Object.values(runtime.requests).filter(entry =>
+              ['blocked', 'failed', 'needs_reconciliation'].includes(entry.status)).length },
+          ].map(metric => <div className="overview-metric" key={metric.label}>
+            <strong>{metric.value}</strong><span>{metric.label}</span>
+          </div>)}
+        </div>
+        <div className="overview-breakdown" aria-label="Task status breakdown">
+          {columns.map(column => {
+            const count = tasks.tasks.filter(task => task.status === column.key).length;
+            return <div className="overview-breakdown-item" key={column.key}>
+              <span className={'lane-icon ' + column.key}/><span>{column.name}</span><strong>{count}</strong>
+            </div>;
+          })}
+        </div>
+        <details className="overview-expander" open>
+          <summary><span className="overview-expander-title">Runner</span>
+            <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')}
+              title={runnerError || undefined}>{runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
+          </summary>
+          <div className="overview-expander-body">
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
@@ -555,6 +576,30 @@ function App() {
         </div>
         <details className="runner-output"><summary>Diagnostics</summary>
           <pre className="runner-result">{runnerResult}</pre>
+        </details>
+      </div>
+            <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
+              disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻ Refresh Runner</button>
+          </div>
+        </details>
+        <details className="overview-expander" open>
+          <summary><span className="overview-expander-title">Agent Skill</span>
+            <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}>
+              {skillState === 'installed' ? 'Installed' : skillState === 'not_installed' ? 'Not installed'
+                : skillState === 'checking' ? 'Checking…' : skillState === 'error' ? 'Error' : 'Unavailable'}
+            </span>
+          </summary>
+          <div className="overview-expander-body">
+            <p className="overview-description">Allow agents to manage .t3/tasks.json using bundled scripts instead of editing JSON manually.</p>
+            {skillError && <p className="runner-error" role="alert">{skillError}</p>}
+            <div className="runner-toolbar">
+              {skillState !== 'installed' && <button className="primary" disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
+                onClick={() => void action(async () => manageSkill('install'))}>{skillBusy ? 'Installing…' : 'Install Skill'}</button>}
+              <button type="button" disabled={busy || skillBusy} onClick={() => void action(async () => manageSkill('status'))}>Refresh</button>
+            </div>
+            <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
+            <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
+          </div>
         </details>
       </div>
     </section>}
