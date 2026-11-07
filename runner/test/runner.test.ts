@@ -175,8 +175,19 @@ test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async 
   next.tasks[0].executionRequests!.push({ requestId: 'git-1', workspace: 'auto' });
   next.tasks[1].executionRequests!.push({ requestId: 'git-2', workspace: 'auto' });
   await atomicWrite(filesFor(project).tasks, next);
+  // Hold the first worker until another worker has started. Timing-based
+  // peak measurements were flaky under CPU pressure in GitHub Actions.
   peak = 0;
-  await runRunner({ home, once: true, execute });
+  let unblock!: () => void;
+  const concurrentStart = new Promise<void>(resolve => { unblock = resolve; });
+  await runRunner({ home, once: true, execute: async () => {
+    active++;
+    peak = Math.max(peak, active);
+    if (active >= 2) unblock();
+    await Promise.race([concurrentStart, new Promise<void>(resolve => setTimeout(resolve, 600))]);
+    active--;
+    return { status: 'completed' as const };
+  } });
   assert.ok(peak >= 2 && peak <= 3, 'Git auto workspace supports parallel execution up to the pool cap');
   assert.equal(a.title, 'A'); assert.equal(b.title, 'B');
 });
