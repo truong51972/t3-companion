@@ -49,7 +49,7 @@ test('both service sections share one accessible refresh component and secondary
 test('rare service operations remain under More and close after selection', () => {
   const runnerMenu = code.split('<ServiceMore service="Runner"')[1]?.split('</ServiceMore>')[0] || '';
   const skillMenu = code.split('<ServiceMore service="Agent Skill"')[1]?.split('</ServiceMore>')[0] || '';
-  for (const item of ['Update Runner','Re-install Runner','Register project','Unregister project','Auto-start when connected','Diagnostics'])
+  for (const item of ['Update Runner','Refresh checkout (git pull)','Register project','Unregister project','Auto-start when connected','Diagnostics'])
     assert.ok(runnerMenu.includes(item), 'Runner More contains '+item);
   for (const item of ['Update Skill','Re-install Skill'])
     assert.ok(skillMenu.includes(item), 'Skill More contains '+item);
