@@ -7,7 +7,7 @@ const runnerShell = readFileSync(new URL('./runner-shell.ts', import.meta.url), 
 
 test('T3 native discovery is read-only, environment scoped, and model exploration is explicit', () => {
   assert.match(bridge, /'vcs.listRefs', 'server.getConfig'/);
-  assert.match(bridge, /'vcs.listRefs', \{ cwd, limit: 200/);
+  assert.match(bridge, /'vcs.listRefs',\s*\{ cwd, limit: 200/);
   assert.match(bridge, /'server.getConfig', \{\}/);
   assert.match(editor, /onExploreModels\(\)/);
   assert.match(editor, /Explore models/);

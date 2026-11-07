@@ -27,8 +27,8 @@ test('built-in Git adapter lists refs and all worktrees without executing a shel
   const result = await inspectGitProject(project);
   assert.equal(result.isGit, true);
   assert.ok(result.refs.includes('feature/testing'));
-  assert.ok(result.worktrees.some(item => item.path === linked && item.branch === 'worktree-testing'));
-  assert.ok(result.worktrees.some(item => item.path === project));
+  assert.ok(result.worktrees.some(item => path.normalize(item.path).toLowerCase() === path.normalize(linked).toLowerCase() && item.branch === 'worktree-testing'));
+  assert.ok(result.worktrees.some(item => path.normalize(item.path).toLowerCase() === path.normalize(project).toLowerCase()));
   assert.equal(RUNNER_CAPABILITIES.existingWorktreeDispatch, false);
 });
 

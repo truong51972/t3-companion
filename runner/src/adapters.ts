@@ -56,7 +56,7 @@ export async function inspectGitProject(input: string): Promise<GitProjectInfo> 
     if (!name) continue;
     const head = lines.find(line => line.startsWith('HEAD '))?.slice(5) || null;
     const branch = lines.find(line => line.startsWith('branch '))?.slice(7).replace(/^refs\/heads\//, '') || null;
-    worktrees.push({ path: name, head, branch, locked: lines.some(line => line.startsWith('locked')) });
+    worktrees.push({ path: path.normalize(name), head, branch, locked: lines.some(line => line.startsWith('locked')) });
   }
-  return { project, isGit: true, repositoryRoot, currentBranch, defaultBranch, refs, worktrees };
+  return { project, isGit: true, repositoryRoot: path.normalize(repositoryRoot), currentBranch, defaultBranch, refs, worktrees };
 }
