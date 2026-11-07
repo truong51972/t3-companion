@@ -39,7 +39,7 @@ test('Git checkout updates only code, preserving legacy files and durable Runner
   const v2 = git('-C', checkout, 'rev-parse', 'HEAD');
   assert.notEqual(v1, v2);
   assert.equal(v2, git('-C', source, 'rev-parse', 'HEAD'));
-  assert.equal(readFileSync(path.join(checkout, 'README.md'), 'utf8'), 'updated\n');
+  assert.equal(readFileSync(path.join(checkout, 'README.md'), 'utf8').replace(/\r\n/g, '\n'), 'updated\n');
   assert.equal(readFileSync(stateFile, 'utf8'), '{"projects":["/example/project"]}\n');
   assert.equal(readFileSync(legacyFile, 'utf8'), 'legacy binary');
 });
