@@ -60,8 +60,10 @@ export function projectThreadInspection(payload: unknown): ThreadInspection | nu
   }
   if (requests.length > 0 && requests.every(pr => pr.state === 'merged'))
     return { stage: 'done', pendingRequestCount: 0, changeRequests: requests };
-  if (requests.some(pr => pr.state === 'open'))
+  if (requests.some(pr => pr.state === 'closed'))
+    return { stage: 'human_review', pendingRequestCount: 0, changeRequests: requests };
+  if (requests.some(pr => pr.state === 'open' || pr.state === 'unknown'))
     return { stage: 'awaiting_merge', pendingRequestCount: 0, changeRequests: requests };
-  // No linked request, unknown state or closed without merge requires a human.
+  // No linked request or closed-unmerged request requires a human.
   return { stage: 'human_review', pendingRequestCount: 0, changeRequests: requests };
 }
