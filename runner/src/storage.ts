@@ -8,7 +8,7 @@ export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed'
 export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: 'auto' | 'root' | 'worktree' }
 export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; executionRequests?: ExecutionRequest[] }
 export interface TaskDocument { version: 1; tasks: Task[] }
-export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }
+export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
 export interface RuntimeDocument { version: 1; requests: Record<string, RuntimeRecord> }
 export const defaultHome = () => path.resolve(process.env.T3_COMPANION_HOME || path.join(process.env.T3CODE_HOME || path.join(homedir(), '.t3'), 'runner'));
 export const registryPath = (home: string) => path.join(home, 'projects.json');
