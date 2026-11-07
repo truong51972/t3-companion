@@ -690,3 +690,12 @@ button.compact{padding:6px 10px}
 @media(prefers-reduced-motion:reduce){
   .board-drag-preview,.task-card{transition:none}
 }
+
+/* Task-owned execution configuration; compact on narrow Side Panels. */
+.task-execution-header{display:flex;align-items:center;gap:8px;justify-content:space-between;
+  padding-top:12px;margin-top:4px;border-top:1px solid #363b44;font-weight:600;font-size:12px}
+.task-execution-header .muted{font-weight:400;font-size:10px}
+.task-execution-help{font-size:11px;line-height:1.5;margin:0}
+.task-execution-summary{margin:3px 0;color:#b5bbc5;font-size:12px;overflow-wrap:anywhere}
+.task-config-label{min-width:0;max-width:125px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  color:#b8c8dc;font-size:10px;border-radius:4px;background:#2c3644;padding:2px 5px}
