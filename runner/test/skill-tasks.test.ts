@@ -47,6 +47,7 @@ test('update status and reject invalid files without destroying data', t => {
   assert.equal(run('queue', '--id', task.id).value.workspace, 'auto');
   assert.equal(run('show', '--id', task.id).value.statusOverride, false);
   assert.notEqual(run('set', '--id', task.id, '--status', 'invalid').status, 0);
+  assert.notEqual(run('set', '--id', task.id, '--status', 'done').status, 0, 'agent skill must not bypass merge verification');
   const file = path.join(project, '.t3', 'tasks.json');
   writeFileSync(file, '{broken');
   assert.notEqual(run('add', '--title', 'C', '--prompt', 'D').status, 0);
