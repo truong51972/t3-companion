@@ -147,8 +147,7 @@ button.compact{padding:6px 10px}
 .overview-expander{min-width:0;border:1px solid #32343a;border-radius:7px;background:#1b1c20}
 .overview-expander>summary{display:flex;align-items:center;gap:8px;min-height:38px;padding:9px 11px;cursor:pointer;list-style:none;user-select:none}
 .overview-expander>summary::-webkit-details-marker{display:none}
-.overview-expander>summary::before{content:'›';font-size:17px;line-height:12px;color:#8f929a;transform:rotate(0deg);transition:transform .1s}
-.overview-expander[open]>summary::before{transform:rotate(90deg)}
+/* Disclosure indicators are provided by the shared Chevron SVG. */
 .overview-expander[open]>summary{border-bottom:1px solid #313338}
 .overview-expander-title{font-size:12px;font-weight:640;flex:1;min-width:0}
 .overview-expander-body{padding:11px;display:grid;gap:10px;min-width:0}
@@ -186,7 +185,7 @@ button.compact{padding:6px 10px}
 .board-empty h3{font-size:13px;font-weight:630}
 .board-empty p{max-width:260px;color:#9da0a7;font-size:12px;line-height:1.5}
 .board-empty .primary{margin-top:5px}
-.lane-chevron{display:inline-flex;align-items:center;justify-content:center;width:11px;color:#9ca0a9;font-size:16px;line-height:1}
+.lane-chevron{display:block;flex:none;color:#9ca0a9}
 .lane-heading-toggle{width:100%;font:inherit;color:inherit;text-align:left;background:transparent;border:0;border-radius:6px}
 .lane-heading-toggle:hover:not(:disabled){background:#242529;border-color:transparent}
 .lane-heading-toggle:focus-visible{outline-offset:-3px}
@@ -216,4 +215,478 @@ button.compact{padding:6px 10px}
   .board-actions{gap:2px}
   .board-actions .compact{padding:6px}
   .board-scroll{padding-left:9px;padding-right:9px}
+}
+
+
+/* Unified interaction and dialog polish — Edge Side Panel and wide modal view */
+.sidepanel {line-height:1.45}
+.sidepanel button, .sidepanel summary, .sidepanel select {transition:background-color .12s ease,border-color .12s ease,color .12s ease}
+.sidepanel :is(button,select,input,textarea,summary):focus-visible {outline:2px solid #93b4ec;outline-offset:2px}
+.sidepanel :is(input,textarea,select)::placeholder{color:#777d88;opacity:1}
+.sidepanel .header{border-bottom:1px solid #25272c}
+.sidepanel .view-header{gap:8px}
+.sidepanel .view-title{overflow:hidden}
+.sidepanel .view-title h2{white-space:nowrap}
+.sidepanel .board-actions .primary{white-space:nowrap}
+.lane{border:1px solid #2b2d32;transition:border-color .12s ease,background-color .12s ease}
+.lane-drop-target{border-color:#829cca;background:#1e2530}
+.lane-drop-target .lane-heading{background:#253044}
+.task-card{position:relative;padding:10px;border-radius:8px;border-color:#383a41;transition:background-color .12s ease,border-color .12s ease,opacity .12s ease}
+.task-card:hover{background:#2b2d32;border-color:#535862}
+.task-card:focus-within{border-color:#7999cc}
+.task-dragging{opacity:.42;border-style:dashed}
+.drag-handle{position:absolute;right:7px;top:7px;width:22px;height:24px;padding:0;display:grid;place-items:center;background:transparent;border:1px solid transparent;color:#858b96;font-size:16px;cursor:grab;touch-action:none;user-select:none}
+.drag-handle:hover:not(:disabled){background:#363942;border-color:#4e515b;color:#e4e7ec}
+.drag-handle:active{cursor:grabbing}
+.task-open{padding-right:28px;min-height:25px}
+.task-open .task-head{align-items:center}
+.task-open .task-head strong{font-size:12px;font-weight:620;line-height:1.45}
+.task-open .task-description{line-height:1.48;max-height:3em}
+.task-meta{gap:5px 8px;margin-top:8px}
+.priority-label,.execution-status,.linked-label{border-radius:4px;padding:2px 5px;background:#30323a;line-height:1.45}
+.priority-label{color:#c2c6cf}
+.execution-status.dispatching{background:#2a3442;color:#adc9ea}
+.execution-status.queued{background:#41372a;color:#ebc78a}
+.execution-status.failed,.execution-status.needs_reconciliation,.execution-status.blocked{background:#402b2b;color:#eab2a9}
+.execution-status.completed{background:#27392d;color:#a1d2b2}
+.task-footer{margin-top:8px;padding-top:7px}
+.task-footer .queue-button{border:1px solid #444751;color:#d6dce8;padding:5px 9px}
+.task-footer .queue-button:hover:not(:disabled){border-color:#657696;background:#323b4d}
+.sidepanel .modal{margin:auto;width:min(520px,calc(100vw - 20px));max-width:calc(100vw - 20px);max-height:min(86dvh,760px);background:#202126;border-color:#44474e;border-radius:12px;box-shadow:0 25px 75px #000c}
+.sidepanel .modal[open]{display:flex;flex-direction:column}
+.sidepanel .modal::backdrop{background:rgba(0,0,0,.69);backdrop-filter:blur(2px)}
+.modal-heading{align-items:flex-start;flex-shrink:0;padding:15px 17px 13px}
+.modal-heading h2{font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.modal-heading>div{min-width:0}
+.modal-heading .icon-button{width:27px;height:27px;flex:none}
+.modal-content{flex:1;min-height:0;overflow:auto;padding:16px 17px;gap:13px;overscroll-behavior:contain}
+.modal-content label{font-size:12px;font-weight:590;color:#d5d8df}
+.modal-content :is(input,textarea,select){font-weight:400;background:#181a1e;border:1px solid #44474e;font-size:12px;min-height:35px}
+.modal-content textarea{line-height:1.52}
+.modal-content textarea:focus{border-color:#91a8cf}
+.modal-content .optional-label{font-size:10px;font-weight:400;color:#999da7}
+.modal-content .modal-intro{color:#aaafb9;font-size:12px;line-height:1.55}
+.modal-actions{flex-shrink:0;gap:7px;padding:11px 17px;background:#1c1e22;border-radius:0 0 12px 12px}
+.modal-actions button{min-height:30px;font-size:11px;white-space:normal}
+.task-details-dialog .modal-content .task-prompt{padding:12px;max-height:40dvh;color:#d6d8de;line-height:1.6;background:#17191d;border:1px solid #343942}
+.task-details-dialog .modal-actions{flex-wrap:wrap}
+.task-details-dialog .modal-actions button:first-child{margin-right:auto}
+.advanced-options{border:1px solid #373a43;border-radius:7px;overflow:hidden}
+.advanced-options>summary{list-style:none;padding:9px 10px;cursor:pointer;font-size:12px;color:#c7cbd5}
+.advanced-options>summary::-webkit-details-marker{display:none}
+/* Advanced options uses the same SVG as the other disclosures. */
+.advanced-options[open]>summary{border-bottom:1px solid #373a43}
+.advanced-fields{display:grid;gap:10px;padding:10px}
+.overview-expander{border-radius:8px}
+.overview-expander>summary:hover{background:#24262c}
+.overview-expander-body{gap:12px}
+.runner-toolbar{gap:6px}
+.overview-expander .runner-toolbar>button{flex:0 1 auto;padding:6px 10px;font-size:11px}
+.sidepanel .danger-action{border:1px solid #76504f;color:#f0b7af;background:#3d292b;border-radius:6px;padding:6px 10px}
+.sidepanel .danger-action:hover:not(:disabled){background:#583437;border-color:#a66e69}
+.data-settings .overview-description{max-width:560px}
+.confirm-dialog .modal-content{padding-block:15px}
+.runner-hint{overflow-wrap:anywhere}
+@media(max-width:599px){
+  .lane{border-radius:8px}
+  .lane-heading{padding:10px 11px}
+  .lane-body{gap:7px;padding:8px}
+  .task-card{padding:10px}
+  .overview-metrics{gap:6px}
+  .modal-heading{padding:12px 14px}
+  .modal-content{padding:14px}
+  .modal-actions{padding:11px 14px}
+}
+@media(max-width:330px){
+  .overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .overview-breakdown{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:8px}
+  .sidepanel .modal{width:calc(100vw - 12px);max-width:calc(100vw - 12px)}
+}
+@media(prefers-reduced-motion:reduce){
+  .sidepanel button,.sidepanel summary,.sidepanel select,.lane,.task-card{transition:none}
+  .sidepanel .modal::backdrop{backdrop-filter:none}
+}
+
+.queue-warning{font-size:11px;line-height:1.5;color:#efc78a;background:#32291c;border:1px solid #59472c;border-radius:6px;padding:8px 10px}
+
+
+/*
+ * Windowed / snapped / Side Panel layout.
+ * Match the 799px compact threshold in main.tsx. Keep a single scrolling
+ * surface for each page: nested full-height grid rows were trapping scroll
+ * when Edge was tiled into a short window.
+ */
+.kanban-view,.overview-view{min-width:0;overflow:hidden!important}
+.kanban-view .board-scroll{
+  flex:1 1 auto;width:100%;max-width:100%;min-height:0;
+  overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.overview-view .overview-content{
+  flex:1 1 auto;min-height:0;min-width:0;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.sidepanel .view-header{min-width:0}
+.sidepanel .view-header .view-title{flex:1 1 auto;min-width:0}
+.sidepanel .view-title h2{flex:none}
+.sidepanel .view-title .muted{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidepanel .board-actions{flex:0 0 auto;min-width:0}
+.sidepanel .context-field,.sidepanel .context-field select{min-width:0}
+.sidepanel .context-row{width:100%;min-width:0}
+.sidepanel .runner-toolbar,.overview-expander-body,.runner-section{min-width:0}
+.overview-expander>summary{min-width:0}
+.overview-expander>summary .runner-state,.overview-expander>summary .skill-state{
+  flex:0 1 auto;max-width:62%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;
+}
+.overview-expander>summary .muted{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidepanel .modal .modal-content{scrollbar-gutter:stable;overflow-wrap:anywhere}
+.sidepanel .modal .modal-actions{min-width:0}
+.sidepanel .modal .modal-actions button{max-width:100%;min-width:0}
+.sidepanel .modal .request-row{min-width:0}
+.sidepanel .modal .request-row .request-info{flex:1 1 auto;min-width:0}
+.sidepanel .modal .request-row button{flex:0 1 auto;min-width:0;white-space:normal;text-align:center}
+
+/* Desktop: four independent scrolling lanes only when there is room for them. */
+@media (min-width:1200px) and (min-height:620px){
+  .board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;height:100%;min-height:100%;align-items:stretch}
+  .lane{min-width:0;min-height:0;height:100%;max-height:none}
+  .lane-body{min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden}
+}
+/* Tiled medium windows and short desktop windows: content-sized, two-column
+   board rather than four narrow, viewport-height lanes or nested page scroll. */
+@media (min-width:800px) and (max-width:1199px), (min-width:1200px) and (max-height:619px){
+  .board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;height:auto;min-height:0;align-content:start;align-items:start}
+  .lane{min-width:0;height:auto;min-height:120px;max-height:none;align-self:start}
+  .lane-body{min-height:0;max-height:none;overflow:visible}
+  .lane-empty{padding:18px 0}
+  .task-card{flex:0 0 auto}
+}
+/* One compact, expandable status group per lane. At tablet widths the
+   cards in an expanded group can still fill two columns. */
+@media (max-width:799px), (min-width:800px) and (max-width:1199px) and (max-height:580px){
+  .kanban-view .board-scroll{padding:0 12px 16px}
+  .board{display:flex;flex-direction:column;gap:9px;height:auto;min-height:0;width:100%}
+  .lane{width:100%;height:auto;max-height:none;min-height:0;flex:0 0 auto;overflow:visible}
+  .lane-heading{min-height:38px;padding:10px 12px;border-bottom:0}
+  .lane-body{display:flex;flex-direction:column;min-height:0;max-height:none;overflow:visible;flex:0 0 auto;gap:8px;padding:9px;border-top:1px solid #2c2e32}
+  .lane-body[hidden]{display:none}
+  .lane-empty{padding:10px 0}
+  .task-card{flex:0 0 auto;min-width:0}
+}
+@media (min-width:600px) and (max-width:799px), (min-width:800px) and (max-width:1199px) and (max-height:580px){
+  .lane-body:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px}
+  .lane-body:not([hidden]) .task-card{height:auto;min-width:0}
+}
+/* Side Panel/window snapping: full-width selectors instead of two unreadable
+   half-width controls; all buttons must be reachable without horizontal scroll. */
+@media (max-width:520px){
+  .sidepanel .header{padding:7px 10px 8px;gap:7px}
+  .sidepanel .context-row{grid-template-columns:minmax(0,1fr);gap:7px}
+  .sidepanel .context-field{gap:3px}
+  .sidepanel .context-field select{height:30px;min-height:30px;padding:4px 28px 4px 9px;font-size:12px}
+  .sidepanel .section-tabs{padding-inline:10px}
+  .sidepanel .view-header{padding:10px 10px 9px}
+  .kanban-view .board-scroll{padding:0 10px 12px}
+  .overview-content{padding:0 10px 14px}
+  .overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .overview-breakdown{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .overview-breakdown-item{justify-content:flex-start;padding-left:9px;font-size:11px}
+  .overview-metric{padding:9px 8px;text-align:left}
+  .overview-metric strong{font-size:18px}
+  .overview-metric span{font-size:11px}
+  .overview-expander>summary{gap:7px;padding:9px 10px}
+  .overview-expander-body{padding:10px}
+  .overview-expander .runner-toolbar>button{
+    flex:1 1 calc(50% - 7px);min-width:0;max-width:100%;
+    min-height:34px;white-space:normal;line-height:1.35;
+  }
+  .overview-expander .runner-more{flex:1 1 calc(50% - 7px);min-width:0}
+  .overview-expander .runner-more>summary{min-height:34px;justify-content:center;width:100%}
+  .overview-expander .runner-autostart{flex:1 1 100%;width:100%;justify-content:flex-start;margin-left:0}
+  .overview-expander .runner-menu{max-width:calc(100vw - 24px)}
+  .sidepanel .modal{width:calc(100vw - 16px);max-width:calc(100vw - 16px)}
+  .sidepanel .modal .field-pair{grid-template-columns:1fr}
+  .sidepanel .modal .modal-actions{gap:7px}
+  .sidepanel .modal .modal-actions>button{flex:1 1 auto}
+  .sidepanel .modal .request-row{flex-wrap:wrap}
+}
+@media (max-width:340px){
+  .sidepanel .view-title{gap:5px}
+  .sidepanel .view-title .muted{font-size:10px}
+  .sidepanel .board-actions{gap:3px}
+  .sidepanel .board-actions .primary{padding-inline:7px}
+  .sidepanel .overview-content{padding-inline:8px}
+  .overview-expander>summary .runner-state,.overview-expander>summary .skill-state{max-width:53%}
+  .sidepanel .modal{width:calc(100vw - 10px);max-width:calc(100vw - 10px)}
+  .sidepanel .modal .modal-heading{padding:10px}
+  .sidepanel .modal .modal-content{padding:10px}
+  .sidepanel .modal .modal-actions{padding:10px}
+}
+/* Height matters when the browser is snapped into a tile. Allow dialogs to
+   use nearly all available height while their content scrolls independently. */
+@media (max-height:620px){
+  .sidepanel .header{padding-top:5px;padding-bottom:5px}
+  .sidepanel .section-tabs{min-height:32px}
+  .sidepanel .section-tabs button{padding-block:6px}
+  .sidepanel .view-header{padding-top:8px;padding-bottom:8px}
+  .sidepanel .modal{max-height:calc(100dvh - 12px)}
+  .sidepanel .modal .modal-heading{padding-block:9px}
+  .sidepanel .modal .modal-actions{padding-block:9px}
+  .sidepanel .modal .modal-content{min-height:0;overflow-y:auto}
+}
+@media (max-height:400px){
+  .sidepanel .modal{max-height:calc(100dvh - 8px)}
+  .sidepanel .modal .modal-heading{padding-block:7px}
+  .sidepanel .modal .modal-actions{padding-block:7px}
+}
+
+
+/* Five-lane lifecycle. Keep the new Review/Merge distinction readable in narrow panels. */
+.lane-icon.awaiting_merge{border-color:#ac9bc9;background:#333047}
+.execution-status.human_review{background:#4b352c;color:#edc3a6}
+.execution-status.awaiting_merge{background:#353047;color:#c8b8e5}
+.execution-status.done{background:#263d30;color:#b4d9c1}
+.request-info a{font-size:11px;line-height:1.5;color:#abc5ef;overflow-wrap:anywhere;word-break:break-word}
+@media (min-width:1500px) and (min-height:620px){
+  .board{grid-template-columns:repeat(5,minmax(0,1fr))}
+}
+@media (min-width:1200px) and (max-width:1499px) and (min-height:620px){
+  .board{height:auto;min-height:0;align-content:start;align-items:start;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .lane{height:auto;min-height:120px;max-height:none}
+  .lane-body{min-height:0;max-height:none;overflow:visible}
+}
+
+
+.runner-config{min-width:0;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:8px 10px;border:1px solid #343942;border-radius:7px;background:#202228}
+.runner-config label{display:grid;gap:5px;min-width:130px;font-size:11px;font-weight:600;color:#c5cbd5}
+.runner-config select{min-height:32px;font-size:12px}
+.runner-config .runner-hint{flex:1 1 160px;padding-bottom:5px}
+@media(max-width:420px){.runner-config{gap:7px}.runner-config label{width:100%}.runner-config .runner-hint{padding:0}}
+
+
+/* Shared Runner / Agent Skill actions. Compact, accessible and in-flow. */
+.service-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;min-width:0}
+.service-actions>button:not(.service-refresh){flex:0 1 auto;min-height:32px;padding:6px 11px;font-size:11px}
+.service-actions>.service-refresh{
+ flex:0 0 32px;display:grid;place-items:center;width:32px;height:32px;min-width:32px;
+ padding:0;border:1px solid #42464f;border-radius:6px;background:#25272d;color:#c0c6d3
+}
+.service-refresh>span{font-size:19px;line-height:1}
+.service-refresh:hover:not(:disabled){background:#323640;border-color:#64738c;color:#f0f3f9}
+.service-refresh.is-refreshing>span{animation:service-refresh-spin 1.1s linear infinite}
+@keyframes service-refresh-spin{to{transform:rotate(360deg)}}
+.service-actions>.service-refresh{margin-left:auto}
+.service-more{flex:0 0 auto;min-width:0;margin-left:0}
+.service-more>summary{
+ display:flex;align-items:center;justify-content:center;gap:7px;
+ min-height:32px;padding:6px 10px;border:1px solid #42464f;border-radius:6px;
+ background:#25272d;color:#c0c6d3;font-size:11px;line-height:18px;
+ list-style:none;cursor:pointer;user-select:none
+}
+.service-more>summary::-webkit-details-marker{display:none}
+.service-more>summary:hover{background:#323640;color:#f0f3f9}
+.service-more[open]{flex:1 1 100%;width:100%;margin-left:0}
+.service-more[open]>summary{width:max-content;margin-left:auto;border-color:#62708a;background:#303744}
+.service-menu{
+ display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;min-width:0;
+ margin-top:8px;padding:10px;border:1px solid #363b45;border-radius:7px;background:#22252b
+}
+.service-menu>button{min-width:0;min-height:34px;padding:7px 9px;font-size:11px;white-space:normal;text-align:left}
+.service-menu-divider{grid-column:1/-1;height:1px;background:#393e48;margin:2px 0}
+.sidepanel .service-menu .runner-autostart{
+ grid-column:1/-1;display:flex;align-items:center;justify-content:flex-start;
+ gap:9px;margin:0;padding:7px 2px;white-space:normal
+}
+.sidepanel .service-menu .runner-autostart input{flex:none}
+.service-help{min-width:0;border-top:1px solid #343942;padding-top:8px}
+.service-help>summary{cursor:pointer;list-style:none;color:#a5abb6;font-size:11px;line-height:1.5}
+.service-help>summary::-webkit-details-marker{display:none}
+/* Nested disclosures reuse the shared SVG instead of font arrows. */
+.service-help>.runner-hint,.service-help>.skill-command,.service-help>.runner-result{margin-top:8px}
+.service-menu>.service-help{grid-column:1/-1}
+@media(max-width:360px){
+ .service-menu{grid-template-columns:1fr}
+ .service-actions>button:not(.service-refresh){min-height:34px}
+}
+@media(prefers-reduced-motion:reduce){.service-refresh.is-refreshing>span{animation:none}}
+
+
+/* Service panel redesign: minimal control chrome and anchored, non-expanding
+   More menus. Applied after the legacy wide-screen/side-panel rules above. */
+.overview-content{gap:8px}
+.overview-expander{border-color:#33373e;background:#1c1e22;border-radius:9px}
+.overview-expander>summary{
+  min-height:42px;padding:10px 12px;
+  background:transparent;border-radius:9px
+}
+.overview-expander[open]>summary{border-radius:9px 9px 0 0}
+.overview-expander>summary:hover{background:#24272c}
+.overview-expander-body{display:flex;flex-direction:column;gap:8px;padding:11px 12px 12px}
+.overview-expander .runner-section{display:flex;flex-direction:column;gap:8px}
+.runner-state,.skill-state{font-size:11px;font-weight:500}
+.service-info{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;min-height:32px;padding:6px 9px;border-radius:6px;
+  background:#262621;color:#c7c2aa;font-size:11px;line-height:1.45;
+}
+.service-info span{flex:1 1 auto;min-width:0}
+.service-info-upgrade{border:1px solid #494438}
+.service-info .text-action{
+  flex:0 0 auto;min-height:22px;padding:2px 5px;
+  border:0;background:transparent;color:#e2c48d;
+  text-decoration:underline;text-underline-offset:3px;font-weight:600;font-size:11px
+}
+.service-info .text-action:hover:not(:disabled){border:0;background:#373126;color:#f6dbad}
+.service-meta{font-size:10px;line-height:1.4;color:#8f959e}
+.overview-expander .runner-config{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  min-height:35px;padding:0;border:0;background:transparent;
+}
+.overview-expander .runner-config label{
+  display:block;min-width:0;width:auto;margin:0;
+  color:#aab0b8;font-size:11px;font-weight:500;white-space:nowrap
+}
+.overview-expander .runner-config select{
+  flex:0 0 auto;min-width:112px;max-width:140px;height:30px;min-height:30px;
+  padding:4px 26px 4px 9px;background:#27292e;font-size:11px
+}
+.overview-expander .runner-config .runner-config-meta{
+  min-width:0;flex:1 1 155px;color:#858b95;font-size:10px
+}
+.overview-expander .service-actions{
+  position:relative;display:flex;align-items:center;flex-wrap:nowrap;
+  gap:7px;min-height:32px;min-width:0
+}
+.overview-expander .service-actions>button:not(.service-refresh){
+  min-height:30px;padding:5px 11px;flex:0 0 auto
+}
+.overview-expander .service-tools{
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:6px;min-width:0;margin-left:auto;flex:0 0 auto;
+}
+.overview-expander .service-actions .service-refresh,
+.overview-expander .service-more>summary{
+  display:grid;place-items:center;flex:none;width:30px;height:30px;
+  min-height:30px;min-width:30px;padding:0;border:1px solid #3f434a;
+  border-radius:6px;background:#27292e;color:#aeb5c0
+}
+.overview-expander .service-actions .service-refresh{margin:0}
+.overview-expander .service-actions .service-refresh svg{width:15px;height:15px}
+.service-refresh.is-refreshing svg{animation:service-refresh-spin 1.1s linear infinite}
+.overview-expander .service-more{position:relative;flex:0 0 30px;width:30px;margin:0}
+.overview-expander .service-more[open]{flex:0 0 30px;width:30px;margin:0}
+.overview-expander .service-more[open]>summary{
+  display:grid;place-items:center;width:30px;margin:0;
+  background:#343b47;border-color:#64738c;color:#edf1f7
+}
+.overview-expander .service-more>summary span{font-size:18px;line-height:12px;letter-spacing:1px;font-weight:700;transform:translateY(-4px)}
+.overview-expander .service-more>summary:hover{background:#353942;color:#eef1f6}
+.overview-expander .service-menu{
+  position:absolute;z-index:40;top:calc(100% + 6px);right:0;
+  display:flex;flex-direction:column;gap:2px;
+  width:228px;min-width:190px;max-width:min(228px,calc(100vw - 32px));
+  margin:0;padding:5px;overflow-wrap:anywhere;
+  border:1px solid #494f59;border-radius:9px;
+  background:#272a30;box-shadow:0 14px 38px #000a;
+}
+.overview-expander .service-menu>button{
+  display:block;width:100%;min-width:0;min-height:31px;
+  padding:7px 9px;border:0;background:transparent;border-radius:5px;
+  color:#dadee5;text-align:left;font-size:11px;line-height:1.35
+}
+.overview-expander .service-menu>button:hover:not(:disabled){background:#393e47;border:0}
+.overview-expander .service-menu-divider{width:100%;height:1px;margin:4px 0;background:#41464f}
+.sidepanel .service-menu .runner-autostart{
+  width:100%;display:flex;gap:8px;margin:0;padding:7px 9px;
+  border-radius:5px;color:#c7cbd4;font-size:11px;line-height:1.3
+}
+.sidepanel .service-menu .runner-autostart:hover{background:#343942}
+.service-menu>.service-help{width:100%;padding:6px 9px;margin:0;border-top:1px solid #41464f}
+.service-menu>.service-help>summary{font-size:11px;color:#b3b9c4}
+.service-menu>.service-help .runner-result{max-height:180px}
+.overview-expander .service-help{padding-top:7px;margin-top:1px}
+.overview-expander .service-help>summary{font-size:11px;color:#8e96a3}
+.overview-expander .service-help .skill-command{font-size:10px}
+@media(max-width:420px){
+  .overview-expander .runner-config{gap:7px}
+  .overview-expander .runner-config label{width:auto}
+  .overview-expander .runner-config .runner-config-meta{flex:1 1 100%;padding:0}
+  .overview-expander .service-actions{gap:5px}
+  .overview-expander .service-menu{max-width:min(228px,calc(100vw - 28px))}
+}
+@media(prefers-reduced-motion:reduce){.service-refresh.is-refreshing svg{animation:none}}
+
+
+/* Shared disclosure chevrons: consistent geometry, alignment and animation.
+   The down-pointing SVG rotates -90deg while collapsed and returns when open. */
+.disclosure-chevron{
+  display:block;flex:0 0 14px;width:14px;height:14px;min-width:14px;
+  color:#89919d;transform:rotate(-90deg);
+  transform-origin:center;transition:transform 160ms ease,color 160ms ease;
+}
+.overview-expander>summary>.disclosure-chevron{color:#929ba8}
+.overview-expander[open]>summary>.disclosure-chevron,
+.service-help[open]>summary>.disclosure-chevron,
+.advanced-options[open]>summary>.disclosure-chevron,
+.lane-chevron.is-open{transform:rotate(0deg);color:#c6d0e0}
+.overview-expander>summary:hover>.disclosure-chevron,
+.service-help>summary:hover>.disclosure-chevron,
+.advanced-options>summary:hover>.disclosure-chevron,
+.lane-heading-toggle:hover .disclosure-chevron{color:#e0e5ef}
+.service-help>summary{display:flex;align-items:center;gap:5px}
+.service-help>summary>.disclosure-chevron{width:13px;height:13px;min-width:13px;flex-basis:13px}
+.advanced-options>summary{display:flex;align-items:center;justify-content:space-between;gap:9px}
+.advanced-options>summary>.disclosure-chevron{margin-left:auto}
+.lane-title>.lane-chevron{width:14px;height:14px;flex-basis:14px}
+@media(prefers-reduced-motion:reduce){.disclosure-chevron{transition:none}}
+
+
+/* Pointer-based Board drag: full-card mouse target, explicit touch grip.
+   Never use HTML5 draggable on nested buttons in Chromium Side Panels. */
+.task-card{position:relative;touch-action:pan-y;cursor:grab}
+.task-card .task-open{cursor:grab;user-select:none}
+.task-card .task-footer,.task-card .task-footer button,
+.task-card .task-more summary{cursor:pointer}
+.task-card .drag-handle{
+  display:grid;place-items:center;right:5px;top:5px;
+  width:32px;height:32px;padding:0;border-radius:6px;
+  z-index:1;touch-action:none;cursor:grab;
+  font-size:18px;line-height:1;color:#a9b3c4;
+}
+.task-card:hover .drag-handle,.task-card .drag-handle:focus-visible{
+  color:#dbe6f6;background:#343b46;border-color:#535f70;
+}
+.board-pointer-dragging,.board-pointer-dragging *{
+  cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important
+}
+.task-dragging{opacity:.36;box-shadow:none}
+.board-drag-preview{
+  position:fixed;z-index:3000;pointer-events:none;
+  display:flex;align-items:center;gap:9px;
+  width:min(220px,calc(100vw - 20px));min-height:40px;
+  padding:9px 12px;overflow:hidden;
+  background:#353e4c;color:#e7edf7;border:1px solid #8096b7;
+  border-radius:9px;box-shadow:0 14px 34px #000b;
+  font-size:12px;font-weight:600;line-height:1.35;
+}
+.board-drag-preview span:last-child{
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.board-drag-preview-icon{flex:none;font-size:17px;color:#b5c9e8}
+.task-drop-before::before,.task-drop-after::after{
+  content:'';position:absolute;left:3px;right:3px;
+  height:3px;border-radius:3px;background:#9dbcf3;
+  pointer-events:none;z-index:3;
+  box-shadow:0 0 0 2px #1d222a;
+}
+.task-drop-before::before{top:-6px}
+.task-drop-after::after{bottom:-6px}
+.lane-drop-target{border-color:#758db5!important;background:#222a35!important}
+.lane-drop-target .lane-heading{background:#2b3647}
+@media(hover:none){
+  .task-card .drag-handle{background:#303744;border:1px solid #44536a}
+}
+@media(prefers-reduced-motion:reduce){
+  .board-drag-preview,.task-card{transition:none}
 }

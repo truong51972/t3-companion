@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask } from '../src/storage.ts';
-import { runRunner, status, requestStop } from '../src/runner.ts';
+import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask, readRunnerSettings, saveRunnerSettings } from '../src/storage.ts';
+import { runRunner, status, requestStop, workspaceBaseFor } from '../src/runner.ts';
 async function sandbox(t: any) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 't3-companion-'));
   t.after(() => fs.rm(tmp, { recursive: true, force: true }));
@@ -16,7 +16,7 @@ async function sandbox(t: any) {
 test('single projects.json registry with canonical paths', async t => {
   const { project, home } = await sandbox(t);
   await registerProject(project, home); await registerProject(project, home);
-  assert.deepEqual(await listProjects(home), [project]);
+  assert.deepEqual(await listProjects(home), [await fs.realpath(project)]);
   await unregisterProject(project, home); assert.deepEqual(await listProjects(home), []);
 });
 test('task creation produces project .t3/tasks.json and not runtime until dispatched', async t => {
@@ -108,7 +108,11 @@ test('duplicate execution request IDs fail validation without overwriting task d
   await atomicWrite(filesFor(project).tasks, doc);
   await assert.rejects(readTasks(project), /Invalid task contract/);
 });
-test('T3 adapter safely passes prompt via stdin and accepts JSON result', async t => {
+// This uses a POSIX shebang executable. Windows cannot spawn a .js file
+// directly without a native .exe, which is covered separately by CLI resolver
+// tests and real-host smoke testing.
+test('T3 adapter safely passes prompt via stdin and accepts JSON result',
+  { skip: process.platform === 'win32' ? 'POSIX shebang executable' : false }, async t => {
   const { project, home } = await sandbox(t); await registerProject(project, home);
   const tmp = path.dirname(home);
   const mock = path.join(tmp, 'mock-t3');
@@ -138,4 +142,145 @@ test('cloned runner bin works directly with Node without npm link', async t => {
   const data = JSON.parse(result.stdout);
   assert.equal(data.running, false);
   assert.equal(data.home, home);
+});
+
+test('auto workspace resolves the selected Git branch, without hardcoded main', async t => {
+  const { project } = await sandbox(t);
+  const init = spawnSync('git', ['init', '-b', 'feature/test', project], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'auto' }), 'feature/test');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'worktree', worktree: 'release' }), 'release');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'root', worktree: 'release' }), null);
+  assert.equal(workspaceBaseFor(project, { requestId: 'x' }), null, 'legacy requests stay in root');
+});
+test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async t => {
+  const { project, home } = await sandbox(t);
+  await registerProject(project, home);
+  const a = await createTask(project, 'A', 'one');
+  const b = await createTask(project, 'B', 'two');
+  const doc = await readTasks(project);
+  for (const task of doc.tasks) task.executionRequests![0].workspace = 'auto';
+  await atomicWrite(filesFor(project).tasks, doc);
+  let active = 0, peak = 0;
+  const execute = async () => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return { status: 'completed' as const };
+  };
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 1, 'non-Git auto workspace uses serial root');
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 1);
+  const init = spawnSync('git', ['init', '-b', 'integration', project], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+  // Existing completed request does not re-run; the next run can execute other isolated requests.
+  const next = await readTasks(project);
+  next.tasks[0].executionRequests!.push({ requestId: 'git-1', workspace: 'auto' });
+  next.tasks[1].executionRequests!.push({ requestId: 'git-2', workspace: 'auto' });
+  await atomicWrite(filesFor(project).tasks, next);
+  // Hold the first worker until another worker has started. Timing-based
+  // peak measurements were flaky under CPU pressure in GitHub Actions.
+  peak = 0;
+  let unblock!: () => void;
+  const concurrentStart = new Promise<void>(resolve => { unblock = resolve; });
+  await runRunner({ home, once: true, execute: async () => {
+    active++;
+    peak = Math.max(peak, active);
+    if (active >= 2) unblock();
+    await Promise.race([concurrentStart, new Promise<void>(resolve => setTimeout(resolve, 600))]);
+    active--;
+    return { status: 'completed' as const };
+  } });
+  assert.ok(peak >= 2 && peak <= 3, 'Git auto workspace supports parallel execution up to the pool cap');
+  assert.equal(a.title, 'A'); assert.equal(b.title, 'B');
+});
+test('explicit root request stays serialized even with a baseRef field', async t => {
+  const { project, home } = await sandbox(t);
+  await registerProject(project, home);
+  await createTask(project, 'A', 'one');
+  await createTask(project, 'B', 'two');
+  const doc = await readTasks(project);
+  for (const task of doc.tasks) {
+    task.executionRequests![0].workspace = 'root';
+    task.executionRequests![0].worktree = 'unexpected-legacy-base';
+  }
+  await atomicWrite(filesFor(project).tasks, doc);
+  let active = 0, peak = 0;
+  await runRunner({ home, once: true, execute: async () => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return { status: 'completed' };
+  }});
+  assert.equal(peak, 1);
+});
+
+test('Runner settings persist and control the scheduler independently of browser preferences', async t => {
+  const { home, project } = await sandbox(t);
+  assert.deepEqual(await readRunnerSettings(home), { maxConcurrent: 3, scanIntervalMs: 10000 });
+  await assert.rejects(saveRunnerSettings({ maxConcurrent: 4, scanIntervalMs: 10000 }, home), /1\.\.3/);
+  await saveRunnerSettings({ maxConcurrent: 1, scanIntervalMs: 10000 }, home);
+  await registerProject(project, home);
+  for (let i = 0; i < 3; i++) await createTask(project, 'Task ' + i, 'work', 'main');
+  let active = 0, peak = 0, waitForPair = false;
+  let release!: () => void;
+  const pair = new Promise<void>(resolve => { release = resolve; });
+  const execute = async () => {
+    active++; peak = Math.max(active, peak);
+    if (waitForPair && active >= 2) release();
+    await Promise.race([
+      waitForPair ? pair : Promise.resolve(),
+      new Promise<void>(resolve => setTimeout(resolve, 400)),
+    ]);
+    active--;
+    return { status: 'completed' as const };
+  };
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 1);
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 1);
+  await saveRunnerSettings({ maxConcurrent: 2, scanIntervalMs: 10000 }, home);
+  waitForPair = true; peak = 0;
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 2);
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 3);
+});
+
+test('Runner rescans a waiting T3 thread, then follows open PR to merged Done', async t => {
+  const { home, project } = await sandbox(t);
+  await registerProject(project, home);
+  const task = await createTask(project, 'Implement change', 'Do the work', 'main');
+  const requestId = task.executionRequests![0].requestId;
+  let stage = 'human_review';
+  let calls = 0;
+  const inspect = async (_project: string, threadId: string) => {
+    assert.equal(threadId, 'thread-a');
+    return { stage: stage as 'human_review' | 'awaiting_merge' | 'done', pendingRequestCount: stage === 'human_review' ? 1 : 0,
+      changeRequests: stage === 'human_review' ? [] : [{ url: 'https://github.com/a/b/pull/1',
+        state: stage === 'done' ? 'merged' as const : 'open' as const }] };
+  };
+  await runRunner({ home, once: true, inspect, execute: async () => {
+    calls++;
+    return { status: 'blocked', threadId: 'thread-a' };
+  } });
+  let record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.status, 'blocked');
+  assert.equal(record.workflowStage, 'human_review');
+  stage = 'awaiting_merge';
+  record.lastInspectedAt = '2000-01-01T00:00:00.000Z';
+  const file = filesFor(project).runtime;
+  await atomicWrite(file, await readRuntime(project).then(doc => ({ ...doc, requests: { ...doc.requests, [requestId]: record } })));
+  await runRunner({ home, once: true, inspect, execute: async () => { calls++; return { status: 'completed' }; } });
+  record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.status, 'completed');
+  assert.equal(record.workflowStage, 'awaiting_merge');
+  stage = 'done';
+  record.lastInspectedAt = '2000-01-01T00:00:00.000Z';
+  await atomicWrite(file, await readRuntime(project).then(doc => ({ ...doc, requests: { ...doc.requests, [requestId]: record } })));
+  await runRunner({ home, once: true, inspect, execute: async () => { calls++; return { status: 'completed' }; } });
+  record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.workflowStage, 'done');
+  assert.equal(record.changeRequests?.[0]?.state, 'merged');
+  assert.equal(calls, 1, 'scanning must not re-run an agent task');
+  assert.equal((await readTasks(project)).tasks[0].status, 'todo', 'Runner must never mutate task definitions');
 });

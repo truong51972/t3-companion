@@ -1,3 +1,33 @@
-.popup{width:330px;padding:16px;max-height:580px;overflow-y:auto}
-.popup header{padding-bottom:8px}.popup .panel{gap:10px;background:transparent;padding:13px}
-.popup .panel .muted{font-size:12px;line-height:1.5}.popup .buttons button{padding:7px 9px}
+/*
+ * Browser-action popups are sized by their contents in Chromium / Edge.
+ * Do NOT size the outer document with vw/dvw, or with a min(…, 100vw)
+ * expression: viewport width is calculated from this content, creating a
+ * circular dependency that collapses the popup to a few pixels.
+ *
+ * Side Panel responsiveness is handled by sidepanel.css, not by this popup.
+ */
+html, body, #root {
+  width: 336px;
+  min-width: 336px;
+  max-width: 336px;
+  margin: 0;
+}
+body { overflow-x: hidden; }
+.popup {
+  box-sizing: border-box;
+  width: 336px;
+  min-width: 336px;
+  max-width: 336px;
+  max-height: 580px;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.popup header { padding-bottom: 8px; }
+.popup .panel { gap: 10px; background: transparent; padding: 12px; }
+.popup .panel .muted { font-size: 12px; line-height: 1.5; }
+.popup .buttons button { padding: 7px 9px; }
+.popup .panel, .popup .row, .popup .row > div { min-width: 0; }
+.popup .row .caption, .popup .row .tag { overflow-wrap: anywhere; }
+.popup .buttons { min-width: 0; }
+.popup .buttons button { min-width: 0; white-space: normal; }

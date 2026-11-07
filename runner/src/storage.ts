@@ -3,15 +3,35 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
-export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'awaiting_merge' | 'done';
 export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed' | 'needs_reconciliation';
-export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string }
+export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: 'auto' | 'root' | 'worktree' }
 export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; executionRequests?: ExecutionRequest[] }
 export interface TaskDocument { version: 1; tasks: Task[] }
-export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }
+export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
 export interface RuntimeDocument { version: 1; requests: Record<string, RuntimeRecord> }
 export const defaultHome = () => path.resolve(process.env.T3_COMPANION_HOME || path.join(process.env.T3CODE_HOME || path.join(homedir(), '.t3'), 'runner'));
 export const registryPath = (home: string) => path.join(home, 'projects.json');
+export type RunnerSettings = { maxConcurrent: number; scanIntervalMs: number };
+export const DEFAULT_RUNNER_SETTINGS: RunnerSettings = { maxConcurrent: 3, scanIntervalMs: 10_000 };
+export const runnerSettingsPath = (home: string) => path.join(home, 'config.json');
+export function validateRunnerSettings(value: unknown): RunnerSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Runner settings');
+  const data = value as Partial<RunnerSettings>;
+  if (!Number.isInteger(data.maxConcurrent) || data.maxConcurrent! < 1 || data.maxConcurrent! > 3)
+    throw new Error('Max concurrent must be 1..3');
+  if (!Number.isInteger(data.scanIntervalMs) || data.scanIntervalMs! < 1_000 || data.scanIntervalMs! > 60_000)
+    throw new Error('Scan interval must be 1000..60000 milliseconds');
+  return { maxConcurrent: data.maxConcurrent!, scanIntervalMs: data.scanIntervalMs! };
+}
+export async function readRunnerSettings(home = defaultHome()): Promise<RunnerSettings> {
+  return validateRunnerSettings(await readJson(runnerSettingsPath(home), DEFAULT_RUNNER_SETTINGS));
+}
+export async function saveRunnerSettings(input: RunnerSettings, home = defaultHome()): Promise<RunnerSettings> {
+  const validated = validateRunnerSettings(input);
+  await atomicWrite(runnerSettingsPath(home), validated);
+  return validated;
+}
 export const filesFor = (project: string) => ({ tasks: path.join(project, '.t3', 'tasks.json'), runtime: path.join(project, '.t3', 'runtime.json') });
 export const emptyTasks = (): TaskDocument => ({ version: 1, tasks: [] });
 export const emptyRuntime = (): RuntimeDocument => ({ version: 1, requests: {} });
@@ -60,12 +80,14 @@ function validTaskDocument(data: any): data is TaskDocument {
   const ids = new Set<string>();
   const requestIds = new Set<string>();
   return data?.version === 1 && Array.isArray(data.tasks) && data.tasks.every((task: any) => {
-    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','done'].includes(task.status)) return false;
+    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','awaiting_merge','done'].includes(task.status)) return false;
     ids.add(task.id);
     return task.executionRequests === undefined || (Array.isArray(task.executionRequests) && task.executionRequests.every((req: any) => {
       if (!req || typeof req.requestId !== 'string' || !req.requestId || requestIds.has(req.requestId)) return false;
       requestIds.add(req.requestId);
-      return (req.worktree === undefined || typeof req.worktree === 'string') && (req.notBefore === undefined || typeof req.notBefore === 'string');
+      return (req.worktree === undefined || typeof req.worktree === 'string') &&
+        (req.workspace === undefined || ['auto','root','worktree'].includes(req.workspace)) &&
+        (req.notBefore === undefined || typeof req.notBefore === 'string');
     }));
   });
 }
@@ -90,6 +112,6 @@ export async function createTask(projectInput: string, title: string, prompt: st
   const project = await fs.realpath(path.resolve(projectInput));
   if (!title.trim() || !prompt.trim()) throw new Error('Task title and prompt are required');
   const doc = await readTasks(project);
-  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', executionRequests: [{ requestId: randomUUID(), ...(worktree ? { worktree } : {}) }] };
+  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', executionRequests: [{ requestId: randomUUID(), workspace: worktree ? 'worktree' : 'auto', ...(worktree ? { worktree } : {}) }] };
   doc.tasks.push(task); await atomicWrite(filesFor(project).tasks, doc); return task;
 }

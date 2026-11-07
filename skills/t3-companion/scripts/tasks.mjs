@@ -4,10 +4,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const statuses = new Set(['todo', 'in_progress', 'review', 'done']);
+const statuses = new Set(['todo', 'in_progress', 'review', 'awaiting_merge', 'done']);
 const commands = new Set(['list', 'show', 'add', 'set', 'queue', 'remove']);
 const [command, ...args] = process.argv.slice(2);
-const usage = 'Usage: tasks.mjs <list|show|add|set|queue|remove> [--project path] [--id id] [--title text] [--prompt text] [--description text] [--priority 1..3] [--status status] [--worktree name] [--not-before ISO-8601]';
+const usage = 'Usage: tasks.mjs <list|show|add|set|queue|remove> [--project path] [--id id] [--title text] [--prompt text] [--description text] [--priority 1..3] [--status status] [--workspace auto|root|worktree] [--worktree base-ref] [--not-before ISO-8601]';
 
 function options(argv) {
   const result = {};
@@ -17,7 +17,7 @@ function options(argv) {
       throw new Error('Invalid option: ' + option);
     }
     const key = option.slice(2);
-    if (!['project','id','title','prompt','description','priority','status','worktree','not-before'].includes(key) || Object.hasOwn(result, key)) {
+    if (!['project','id','title','prompt','description','priority','status','workspace','worktree','not-before'].includes(key) || Object.hasOwn(result, key)) {
       throw new Error('Unknown or duplicate option: ' + option);
     }
     result[key] = argv[i + 1];
@@ -32,6 +32,7 @@ function validate(doc) {
         typeof task.title !== 'string' || typeof task.prompt !== 'string' || !statuses.has(task.status) ||
         (task.description !== undefined && typeof task.description !== 'string') ||
         (task.priority !== undefined && (!Number.isInteger(task.priority) || task.priority < 1 || task.priority > 3)) ||
+        (task.statusOverride !== undefined && typeof task.statusOverride !== 'boolean') ||
         (task.executionRequests !== undefined && !Array.isArray(task.executionRequests))) {
       throw new Error('Invalid task in tasks.json; refusing to overwrite');
     }
@@ -39,6 +40,7 @@ function validate(doc) {
     for (const request of task.executionRequests || []) {
       if (!request || typeof request.requestId !== 'string' || !request.requestId || requestIds.has(request.requestId) ||
           (request.worktree !== undefined && typeof request.worktree !== 'string') ||
+          (request.workspace !== undefined && !['auto','root','worktree'].includes(request.workspace)) ||
           (request.notBefore !== undefined && typeof request.notBefore !== 'string')) {
         throw new Error('Invalid execution request in tasks.json; refusing to overwrite');
       }
@@ -112,12 +114,17 @@ async function main() {
     if (opt.priority !== undefined) task.priority = priority(opt.priority);
     if (opt.status !== undefined) {
       if (!statuses.has(opt.status)) throw new Error('Invalid status: ' + opt.status);
+      if (opt.status === 'done') throw new Error('Done is reserved for verified merged PR/MR or a manual Board move');
       task.status = opt.status;
+      task.statusOverride = true;
     }
     result = task;
   } else if (command === 'queue') {
     const task = get(doc, opt.id);
-    const request = { requestId: randomUUID() };
+    const workspace = opt.workspace || (opt.worktree === undefined ? 'auto' : 'worktree');
+    if (!['auto','root','worktree'].includes(workspace)) throw new Error('Workspace must be auto, root or worktree');
+    if (workspace === 'root' && opt.worktree !== undefined) throw new Error('--worktree base ref cannot be used with --workspace root');
+    const request = { requestId: randomUUID(), workspace };
     if (opt.worktree !== undefined) {
       if (!opt.worktree.trim()) throw new Error('Worktree cannot be empty');
       request.worktree = opt.worktree;
@@ -127,6 +134,8 @@ async function main() {
       if (Number.isNaN(when.getTime())) throw new Error('Invalid --not-before date');
       request.notBefore = when.toISOString();
     }
+    task.status = 'todo';
+    task.statusOverride = false;
     task.executionRequests ??= [];
     task.executionRequests.push(request); result = { taskId: task.id, ...request };
   } else if (command === 'remove') {

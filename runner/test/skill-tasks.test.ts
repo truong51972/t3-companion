@@ -26,8 +26,14 @@ test('skill add is a backlog-only operation; queue adds distinct requests', t =>
   assert.equal(first.status, 0, first.stderr);
   assert.equal(second.status, 0, second.stderr);
   assert.notEqual(first.value.requestId, second.value.requestId);
+  assert.equal(first.value.workspace, 'auto');
+  assert.equal(second.value.workspace, 'worktree');
+  assert.equal(second.value.worktree, 'main');
+  const root = run('queue', '--id', added.value.id, '--workspace', 'root');
+  assert.equal(root.value.workspace, 'root');
+  assert.notEqual(run('queue', '--id', added.value.id, '--workspace', 'root', '--worktree', 'main').status, 0);
   const listed = run('list');
-  assert.equal(listed.value.tasks[0].executionRequests.length, 2);
+  assert.equal(listed.value.tasks[0].executionRequests.length, 3);
   assert.equal(listed.value.tasks[0].status, 'todo');
   assert.equal(readFileSync(path.join(project, '.t3', 'tasks.json'), 'utf8').includes('Investigate'), true);
   assert.equal(run('show', '--id', added.value.id).value.id, added.value.id);
@@ -35,8 +41,13 @@ test('skill add is a backlog-only operation; queue adds distinct requests', t =>
 test('update status and reject invalid files without destroying data', t => {
   const { project, run } = fixture(t);
   const task = run('add', '--title', 'A', '--prompt', 'B').value;
-  assert.equal(run('set', '--id', task.id, '--status', 'review').value.status, 'review');
+  const reviewed = run('set', '--id', task.id, '--status', 'review').value;
+  assert.equal(reviewed.status, 'review');
+  assert.equal(reviewed.statusOverride, true);
+  assert.equal(run('queue', '--id', task.id).value.workspace, 'auto');
+  assert.equal(run('show', '--id', task.id).value.statusOverride, false);
   assert.notEqual(run('set', '--id', task.id, '--status', 'invalid').status, 0);
+  assert.notEqual(run('set', '--id', task.id, '--status', 'done').status, 0, 'agent skill must not bypass merge verification');
   const file = path.join(project, '.t3', 'tasks.json');
   writeFileSync(file, '{broken');
   assert.notEqual(run('add', '--title', 'C', '--prompt', 'D').status, 0);

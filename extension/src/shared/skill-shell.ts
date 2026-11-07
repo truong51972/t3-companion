@@ -7,9 +7,10 @@ const SKILL_INSTALL_SCRIPT =
   "const marker=process.argv[1];try{" +
   "const project=Buffer.from(process.argv[2]||'','base64url').toString('utf8');" +
   "if(!project||!fs.statSync(project).isDirectory())throw Error('Not a project directory');" +
+  "const action=process.argv[3]||'install';if(!['install','update','reinstall'].includes(action))throw Error('Invalid skill action');" +
   "const win=process.platform==='win32';" +
   "const r=cp.spawnSync(win?'npx.cmd':'npx'," +
-  "['-y','skills','add','truong51972/t3-companion','--skill','t3-companion','-y']," +
+  "(action==='update'?['-y','skills','update','t3-companion','-p','-y']:['-y','skills','add','truong51972/t3-companion','--skill','t3-companion','-y'])," +
   "{cwd:project,encoding:'utf8',timeout:90000,windowsHide:true,shell:win});" +
   "if(r.error||r.status!==0)throw Error(r.error?.message||r.stderr||r.stdout||'Installer failed');" +
   "console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:true}));console.log(marker+':0')" +
@@ -21,8 +22,8 @@ function encodeProjectPath(project: string): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export function skillInstallShellCommand(project: string, marker: string): string {
+export function skillInstallShellCommand(project: string, marker: string, action: 'install' | 'update' | 'reinstall' = 'install'): string {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid command marker');
   if (!project) throw new Error('Project path required');
-  return 'node -e "' + SKILL_INSTALL_SCRIPT + '" -- ' + marker + ' ' + encodeProjectPath(project);
+  return 'node -e "' + SKILL_INSTALL_SCRIPT + '" -- ' + marker + ' ' + encodeProjectPath(project) + ' ' + action;
 }
