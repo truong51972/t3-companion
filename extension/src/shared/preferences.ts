@@ -19,7 +19,7 @@ export const defaultPreferences = (): CompanionPreferences => ({
   manualEnvironmentId: '',
   projectByEnvironment: {},
   workspaceByProject: {},
-  expandedLanes: { todo: true, in_progress: true, review: true, done: false },
+  expandedLanes: { todo: true, in_progress: true, review: true, awaiting_merge: true, done: false },
 });
 function stringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
