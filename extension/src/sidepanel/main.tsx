@@ -61,6 +61,9 @@ function App() {
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<Status | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    title: string; description: string; confirmLabel: string; run: () => Promise<void>; dangerous?: boolean;
+  } | null>(null);
   useEffect(() => {
     let live = true;
     void loadPreferences().then(stored => {
@@ -116,6 +119,7 @@ function App() {
   const queueDialog = useRef<HTMLDialogElement>(null);
   const detailsDialog = useRef<HTMLDialogElement>(null);
   const clearDialog = useRef<HTMLDialogElement>(null);
+  const confirmationDialog = useRef<HTMLDialogElement>(null);
   const runnerProjectsMenu = useRef<HTMLDetailsElement>(null);
   const filesVersion = useRef(0);
   const shellVersion = useRef(0);
@@ -185,6 +189,12 @@ function App() {
     }).catch(() => {});
     return () => { live = false; };
   }, [environmentId, currentProject?.workspaceRoot]);
+  useEffect(() => {
+    const dialog = confirmationDialog.current;
+    if (!dialog) return;
+    if (confirmation && !dialog.open) dialog.showModal();
+    else if (!confirmation && dialog.open) dialog.close();
+  }, [confirmation]);
   useEffect(() => { const dialog = clearDialog.current; if (!dialog) return; if (confirmClear && !dialog.open) dialog.showModal(); else if (!confirmClear && dialog.open) dialog.close(); }, [confirmClear]);
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
@@ -777,7 +787,12 @@ function App() {
                         </select></label>
                         <div className="menu-actions">
                           <button onClick={() => edit(task)}>Edit</button>
-                          <button className="danger" onClick={() => { if (window.confirm('Delete this task?')) void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }), task)); }}>Delete</button>
+                          <button className="danger" onClick={() => setConfirmation({
+                        title: 'Delete task?',
+                        description: 'This removes the task from Companion Board. It does not delete T3 threads or Git worktrees.',
+                        confirmLabel: 'Delete task', dangerous: true,
+                        run: async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }), task),
+                      })}>Delete</button>
                         </div>
                       </div>
                     </details>
@@ -908,7 +923,11 @@ function App() {
           {runnerInstalled === 'true' && !runnerBridgeMissing && <>
             <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('update'))}>Update</button>
             <button disabled={busy || !runnerHostAvailable}
-              onClick={() => { if (window.confirm('Re-install Runner files? Existing tasks, registry and runtime history will be preserved.')) void action(async () => manageRunner('reinstall')); }}>Re-install</button>
+              onClick={() => setConfirmation({
+                title: 'Re-install Runner?',
+                description: 'Runner will drain active tasks, replace its executable files, and restart if it was running. Project registration, tasks and execution history are preserved.',
+                confirmLabel: 'Re-install', run: async () => manageRunner('reinstall'),
+              })}>Re-install</button>
           </>}
           {runnerInstalled === 'true' && <details ref={runnerProjectsMenu} className="runner-more">
             <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
@@ -953,7 +972,11 @@ function App() {
               {skillState === 'installed' && <>
                 <button disabled={busy || skillBusy || !runnerHostAvailable} onClick={() => void action(async () => manageSkill('update'))}>Update</button>
                 <button disabled={busy || skillBusy || !runnerHostAvailable}
-                  onClick={() => { if (window.confirm('Re-install Agent Skill in this project? Existing tasks will be preserved.')) void action(async () => manageSkill('reinstall')); }}>Re-install</button>
+                  onClick={() => setConfirmation({
+                    title: 'Re-install Agent Skill?',
+                    description: 'The Agent Skill will be re-installed in the current project. Existing task files are preserved.',
+                    confirmLabel: 'Re-install', run: async () => manageSkill('reinstall'),
+                  })}>Re-install</button>
               </>}
               <button type="button" disabled={busy || skillBusy} onClick={() => void action(async () => manageSkill('status'))}>Refresh</button>
             </div>
@@ -970,6 +993,23 @@ function App() {
         </details>
       </div>
     </section>}
+    <dialog ref={confirmationDialog} className="modal confirm-dialog" aria-label="Confirm action"
+      onCancel={() => setConfirmation(null)} onClose={() => setConfirmation(null)}
+      onClick={event => onDialogBackdrop(event, () => setConfirmation(null))}>
+      <div className="modal-heading"><div><h2>{confirmation?.title}</h2></div>
+        <button type="button" className="icon-button" aria-label="Cancel action" onClick={() => setConfirmation(null)}>×</button>
+      </div>
+      <div className="modal-content"><p className="modal-intro">{confirmation?.description}</p></div>
+      <div className="modal-actions">
+        <button type="button" onClick={() => setConfirmation(null)}>Cancel</button>
+        <button type="button" className={confirmation?.dangerous ? 'danger-action' : 'primary'} disabled={busy}
+          onClick={() => {
+            const next = confirmation?.run;
+            setConfirmation(null);
+            if (next) void action(next);
+          }}>{confirmation?.confirmLabel}</button>
+      </div>
+    </dialog>
     <dialog ref={clearDialog} className="modal confirm-dialog" aria-label="Clear browser data"
       onCancel={() => setConfirmClear(false)} onClose={() => setConfirmClear(false)}
       onClick={event => onDialogBackdrop(event, () => setConfirmClear(false))}>
