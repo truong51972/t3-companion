@@ -49,6 +49,7 @@ async function downloadAndInstall(force) {
   const sha = (await source.json()).sha;
   if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('Invalid Runner release SHA');
   if (!force && installed && installation()?.sha === sha) return state({ upToDate: true });
+  await fsp.mkdir(root, { recursive: true });
   const staging = await fsp.mkdtemp(path.join(root, '.runner-update-'));
   const backups = [];
   const written = [];
