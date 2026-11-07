@@ -37,6 +37,9 @@ function run(command, ...args) {
   try { return JSON.parse(child.stdout.trim()); }
   catch { throw new Error('Invalid Runner CLI JSON output'); }
 }
+function isT3CliUnavailable(error) {
+  return /T3 CLI not found|T3 CLI executable|T3_COMPANION_T3_BIN/i.test(String(error));
+}
 function installation() {
   try { return JSON.parse(fs.readFileSync(manifest, 'utf8')); }
   catch { return null; }
@@ -110,6 +113,12 @@ async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
     if (previous.running) {
       try { run('start'); }
       catch (restartError) {
+        // The update is valid even if this host doesn't have T3 CLI installed.
+        // Keep the new Runner so Overview can display the CLI diagnosis; let
+        // the user install the prerequisite and start it explicitly.
+        if (isT3CliUnavailable(restartError))
+          return state({ updated: true, restarted: false, requiresCli: true });
+        // Other failed restarts still trigger a complete rollback.
         // A failed restart is a failed upgrade. Restore the entire executable
         // set and its prior version marker before attempting to restart again.
         for (const target of written) await fsp.rm(target, { force: true });
@@ -147,7 +156,11 @@ async function main() {
     const result = await downloadAndInstall(verb === 'reinstall' || verb === 'install',
       encodedTarget || DEFAULT_SOURCE_REF);
     if (!result.running && verb === 'install') {
-      try { run('start'); } catch (error) { if (!/already running/i.test(String(error))) throw error; }
+      try { run('start'); }
+      catch (error) {
+        if (isT3CliUnavailable(error)) return state({ installed: true, requiresCli: true, restarted: false });
+        if (!/already running/i.test(String(error))) throw error;
+      }
       return state();
     }
     return result;
