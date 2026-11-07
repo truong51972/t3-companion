@@ -372,8 +372,9 @@ function App() {
     };
   }, [refresh, manualTabId]);
 
-  // File data is read on connection, project changes, and explicit user actions.
-  // No fixed-interval RPC polling; it caused repeated WebSocket timeouts.
+  // Project task definitions are read only on user action or context change.
+  // Active execution metadata alone may be polled, avoiding expensive task re-reads.
+  // This is bounded and stops when all requests settle or repeated RPCs fail.
   // Runner status is also checked only once per selected environment.
   useEffect(() => {
     if (!tabId || !environmentId || !recognized) return;
@@ -417,6 +418,34 @@ function App() {
     })(); }, 250);
     return () => { active = false; clearTimeout(timer); };
   }, [tabId, environmentId, recognized, runnerHost?.id, runnerHostProject?.id]);
+
+  // Lightweight live-status refresh only while there are outstanding executions.
+  // No project/Runner/Skill polling during idle browsing.
+  useEffect(() => {
+    if (!tabId || !environmentId || !currentProject || !recognized || page !== 'kanban') return;
+    const hasOutstanding = tasks.tasks.some(task => (task.executionRequests || []).some(request => {
+      const status = runtime.requests[request.requestId]?.status;
+      return !status || status === 'dispatching';
+    }));
+    if (!hasOutstanding) return;
+    let failures = 0;
+    let pending = false;
+    const key = scopedKey.current, project = currentProject, selected = projectId;
+    const timer = setInterval(() => {
+      if (pending || document.visibilityState !== 'visible' || scopedKey.current !== key) return;
+      pending = true;
+      void readProjectJson<Runtime>(tabId, environmentId, project.workspaceRoot, 'runtime.json', emptyRuntime())
+        .then(data => {
+          if (scopedKey.current !== key || projectSelectionRef.current !== selected) return;
+          const valid = validateRuntime(data);
+          failures = 0;
+          setRuntime(old => JSON.stringify(old) === JSON.stringify(valid) ? old : valid);
+        })
+        .catch(() => { if (++failures >= 2) clearInterval(timer); })
+        .finally(() => { pending = false; });
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [tabId, environmentId, currentProject?.workspaceRoot, projectId, recognized, page, tasks, runtime]);
 
   // Skill checks are read-only project RPC calls; avoid extra terminal history.
   useEffect(() => {
