@@ -20,7 +20,7 @@ node <skill-dir>/scripts/tasks.mjs queue --id <task-id> --workspace root  # expl
 node <skill-dir>/scripts/tasks.mjs show --id <task-id>
 ```
 
-Available commands: `list`, `show --id`, `add --title --prompt [--description] [--priority 1..3]`, `set --id [--title] [--prompt] [--description] [--priority 1..3] [--status todo|in_progress|review|done]`, `queue --id [--workspace auto|worktree|root] [--worktree base-ref] [--not-before <ISO-8601>]`, and `remove --id`. Set `--project <absolute-path>` on any command to operate on a different project explicitly.
+Available commands: `list`, `show --id`, `add --title --prompt [--description] [--priority 1..3]`, `set --id [--title] [--prompt] [--description] [--priority 1..3] [--status todo|in_progress|review|awaiting_merge|done]`, `queue --id [--workspace auto|worktree|root] [--worktree base-ref] [--not-before <ISO-8601>]`, and `remove --id`. Set `--project <absolute-path>` on any command to operate on a different project explicitly.
 
 The script prints JSON results for easy machine parsing. It validates the task schema, refuses invalid/corrupted files, and uses temporary-file + rename writes. Do not edit JSON yourself.
 
