@@ -15,6 +15,20 @@ type Task = { id: string; title: string; description?: string; prompt: string; s
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
 type Page = 'kanban' | 'overview';
+const COMPACT_BOARD_QUERY = '(max-width: 599px)';
+
+function useCompactBoard(): boolean {
+  const [compact, setCompact] = useState(() => window.matchMedia(COMPACT_BOARD_QUERY).matches);
+  useEffect(() => {
+    const media = window.matchMedia(COMPACT_BOARD_QUERY);
+    const update = () => setCompact(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return compact;
+}
+
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Review' }, { key: 'done', name: 'Done' },
@@ -36,6 +50,10 @@ function validateRuntime(data: Runtime): Runtime {
 }
 function App() {
   const [page, setPage] = useState<Page>('kanban');
+  const compactBoard = useCompactBoard();
+  const [expandedLanes, setExpandedLanes] = useState<Record<Status, boolean>>({
+    todo: true, in_progress: true, review: true, done: false,
+  });
   const [tabId, setTabId] = useState<number | null>(null);
   const [tabUrl, setTabUrl] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -514,12 +532,34 @@ function App() {
           <button className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
         </div>
       </div>
+      {tasks.tasks.length === 0 ? (
+        <div className="board-empty">
+          <div className="board-empty-mark" aria-hidden="true">☷</div>
+          <h3>No tasks yet</h3>
+          <p>Create your first task to start organizing work.</p>
+          <button type="button" className="primary compact" disabled={busy} onClick={() => edit()}>+ New task</button>
+        </div>
+      ) : (
       <div className="board-scroll">
         <div className="board">{columns.map(column => {
           const laneTasks = tasks.tasks.filter(t => t.status === column.key).sort((a,b) => (a.priority || 2) - (b.priority || 2));
+          const expanded = !compactBoard || (laneTasks.length > 0 && expandedLanes[column.key]);
+          const laneHeading = <>
+            <div className="lane-title">
+              {compactBoard && <span className="lane-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>}
+              <span className={'lane-icon ' + column.key}/><strong>{column.name}</strong>
+            </div>
+            <span className="lane-count">{laneTasks.length}</span>
+          </>;
           return <div className="lane" key={column.key}>
-            <div className="lane-heading"><div className="lane-title"><span className={'lane-icon ' + column.key}/><strong>{column.name}</strong></div><span className="lane-count">{laneTasks.length}</span></div>
-            <div className="lane-body">
+            {compactBoard && laneTasks.length > 0 ? (
+              <button type="button" className="lane-heading lane-heading-toggle"
+                aria-expanded={expanded} aria-controls={'lane-body-' + column.key}
+                onClick={() => setExpandedLanes(current => ({ ...current, [column.key]: !current[column.key] }))}>
+                {laneHeading}
+              </button>
+            ) : <div className="lane-heading">{laneHeading}</div>}
+            <div id={'lane-body-' + column.key} className="lane-body" hidden={!expanded}>
               {laneTasks.length === 0 && <p className="lane-empty">No tasks</p>}
               {laneTasks.map(task => {
                 const execution = taskExecution(task);
@@ -556,8 +596,10 @@ function App() {
           </div>;
         })}</div>
       </div>
+      )}
     </section>), [
     tasks, runtime, busy, projectId, tabId, environmentId, tabUrl, threads, projects, currentProject?.workspaceRoot,
+    compactBoard, expandedLanes,
   ]);
   return <main className="stack sidepanel">
     <header className="header">
