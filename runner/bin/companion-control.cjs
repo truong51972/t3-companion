@@ -25,7 +25,7 @@ const fileExists = file => fs.existsSync(path.join(root, file));
 const hasLegacyRunner = () => coreFiles.every(fileExists);
 const hasCurrentRunner = () => files.every(fileExists);
 const REPOSITORY = 'truong51972/t3-companion';
-const SOURCE_REF = 'main';
+const DEFAULT_SOURCE_REF = 'main';
 
 function run(command, ...args) {
   const child = spawnSync(process.execPath, [entry, command, ...args], {
@@ -45,11 +45,13 @@ function state(extra = {}) {
   return installed ? { ...run('status'), installed: true, upgradeRequired: !hasCurrentRunner(), version: installation()?.sha || null, ...extra }
     : { installed: false, running: false, pid: null, version: null, ...extra };
 }
-async function downloadAndInstall(force) {
+async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
+  if (sourceRef !== 'main' && !/^[0-9a-f]{40}$/.test(sourceRef))
+    throw new Error('Invalid Runner release ref: expected main or a full commit SHA');
   const installed = hasCurrentRunner();
   const previous = hasLegacyRunner() ? run('status') : { running: false };
   const previousInstall = installation();
-  const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/' + SOURCE_REF,
+  const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/' + sourceRef,
     { headers: { 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
   if (!source.ok) throw new Error('Cannot resolve Runner release: HTTP ' + source.status);
   const sha = (await source.json()).sha;
@@ -134,7 +136,10 @@ async function main() {
   if (!['install','update','reinstall','status','start','stop','add','remove','configure'].includes(verb))
     throw new Error('Unknown Runner operation');
   if (verb === 'install' || verb === 'update' || verb === 'reinstall') {
-    const result = await downloadAndInstall(verb === 'reinstall' || verb === 'install');
+    // For upgrades the optional third argument is the trusted release SHA
+    // compiled into this extension; other commands retain encodedTarget semantics.
+    const result = await downloadAndInstall(verb === 'reinstall' || verb === 'install',
+      encodedTarget || DEFAULT_SOURCE_REF);
     if (!result.running && verb === 'install') {
       try { run('start'); } catch (error) { if (!/already running/i.test(String(error))) throw error; }
       return state();
