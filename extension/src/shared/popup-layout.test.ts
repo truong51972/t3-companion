@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const css = readFileSync(new URL('../popup/popup.css', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../../popup.html', import.meta.url), 'utf8');
+const styleRules = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
 test('browser action popup has an intrinsic fixed width rather than viewport-dependent width', () => {
   // Edge/Chromium extension popups size their viewport from the DOM.
@@ -11,8 +12,8 @@ test('browser action popup has an intrinsic fixed width rather than viewport-dep
   // producing a very narrow/clipped popup with a tiny scrollbar.
   assert.match(css, /html,\s*body,\s*#root\s*\{[^}]*width:\s*336px/s);
   assert.match(css, /\.popup\s*\{[^}]*width:\s*336px/s);
-  assert.doesNotMatch(css, /\b(?:100)?(?:[sd]\s*)?vw\b/i);
-  assert.doesNotMatch(css, /\b(?:100)?(?:[sd]\s*)?vh\b/i);
+  assert.doesNotMatch(styleRules, /\b(?:100)?(?:[sd]\s*)?vw\b/i);
+  assert.doesNotMatch(styleRules, /\b(?:100)?(?:[sd]\s*)?vh\b/i);
   assert.match(html, /id="root"/);
 });
 
