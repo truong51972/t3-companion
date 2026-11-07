@@ -1,11 +1,26 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import { projectThreadInspection, type ThreadInspection } from './workflow.ts';
 import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const inspectExec = promisify(execFile);
+export type InspectThread = (project: string, threadId: string) => Promise<ThreadInspection | null>;
+/** Read T3's server-owned thread projection, never scrape visible UI or agent text. */
+export const inspectT3Thread: InspectThread = async (project, threadId) => {
+  try {
+    const { stdout } = await inspectExec(process.env.T3_COMPANION_T3_BIN || 't3',
+      ['thread', 'show', threadId, '--messages', '1', '--json'],
+      { cwd: project, encoding: 'utf8', timeout: 9000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
+    return projectThreadInspection(JSON.parse(stdout));
+  } catch {
+    return null; // an unreachable T3 host is unknown, never proof of completion/merge
+  }
+};
 const lockDir = (home: string) => path.join(home, 'runner.lock');
 const stopFile = (home: string) => path.join(home, 'stop.json');
 const isAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e: any) { return e.code === 'EPERM'; } };
@@ -100,8 +115,10 @@ export const executeT3: Execute = async (project, task, request) => {
   });
 };
 
-export async function runRunner({ home = defaultHome(), once = false, intervalMs = 10000, concurrency = 3, execute = executeT3 }:
-  { home?: string; once?: boolean; intervalMs?: number; concurrency?: number; execute?: Execute } = {}) {
+export async function runRunner({ home = defaultHome(), once = false, intervalMs = 10000, concurrency = 3, execute = executeT3, inspect }:
+  { home?: string; once?: boolean; intervalMs?: number; concurrency?: number; execute?: Execute; inspect?: InspectThread } = {}) {
+  // Synthetic executors used by unit tests do not contact a real T3 server.
+  const inspectThread = inspect ?? (execute === executeT3 ? inspectT3Thread : null);
   if (!Number.isInteger(intervalMs) || intervalMs < 10) throw new Error('Polling interval must be >= 10ms');
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3) throw new Error('Concurrency must be 1..3');
   const owner = await acquire(home);
@@ -123,6 +140,43 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
   }
 
   const nonWorktreeProjects = new Set<string>();
+  const INSPECT_INTERVAL_MS = 30_000;
+  /** Reconcile finished/waiting sessions and PR merge status without editing tasks.json.
+   * Inspect no more than four threads per project pass; 30s per-thread throttle.
+   */
+  async function reconcile(project: string) {
+    if (!inspectThread) return;
+    const snapshot = await readRuntime(project);
+    const now = Date.now();
+    const items = Object.entries(snapshot.requests)
+      .filter(([, entry]) => Boolean(entry.threadId) &&
+        ['completed', 'blocked', 'failed', 'needs_reconciliation'].includes(entry.status) &&
+        entry.workflowStage !== 'done' &&
+        (!entry.lastInspectedAt || now - Date.parse(entry.lastInspectedAt) >= INSPECT_INTERVAL_MS))
+      .slice(0, 4);
+    await Promise.allSettled(items.map(async ([id, entry]) => {
+      const observed = await inspectThread(project, entry.threadId!);
+      const at = new Date().toISOString();
+      await updateRuntime(project, current => {
+        const record = current.requests[id];
+        if (!record || record.threadId !== entry.threadId) return false;
+        record.lastInspectedAt = at;
+        if (observed) {
+          record.workflowStage = observed.stage;
+          record.pendingRequestCount = observed.pendingRequestCount;
+          record.changeRequests = observed.changeRequests;
+          if (record.status === 'blocked' && observed.stage !== 'human_review') {
+            // The user resumed this session in T3. It can run or finish without
+            // a new Companion request; keep the original request ID.
+            record.status = observed.stage === 'in_progress' ? 'dispatching' : 'completed';
+          } else if (record.status === 'dispatching' && observed.stage !== 'in_progress') {
+            record.status = observed.stage === 'human_review' && observed.pendingRequestCount > 0
+              ? 'blocked' : 'completed';
+          }
+        }
+      });
+    }));
+  }
   let stopping = false;
   const onSignal = () => { stopping = true; };
   process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
@@ -171,12 +225,21 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
                 // Full agent replies belong in T3 threads, not the Side Panel's
                 // repeatedly-read runtime.json. Keep only execution metadata.
                 const { reply: _reply, ...summary } = result;
+                // The first projection may already expose the linked PR, so
+                // use it immediately. Subsequent scans follow merges and input.
+                const observed = result.threadId && inspectThread
+                  ? await inspectThread(project, result.threadId).catch(() => null) : null;
                 await updateRuntime(project, updated => {
-                  updated.requests[request.requestId] = { ...updated.requests[request.requestId], ...summary, finishedAt: new Date().toISOString() };
+                  updated.requests[request.requestId] = {
+                    ...updated.requests[request.requestId], ...summary, finishedAt: new Date().toISOString(),
+                    workflowStage: observed?.stage ?? 'human_review',
+                    ...(observed ? { pendingRequestCount: observed.pendingRequestCount,
+                      changeRequests: observed.changeRequests, lastInspectedAt: new Date().toISOString() } : {}),
+                  };
                 });
               } catch (error) {
                 await updateRuntime(project, updated => {
-                  updated.requests[request.requestId] = { ...updated.requests[request.requestId], status: 'failed', error: String(error), finishedAt: new Date().toISOString() };
+                  updated.requests[request.requestId] = { ...updated.requests[request.requestId], status: 'failed', workflowStage: 'human_review', error: String(error), finishedAt: new Date().toISOString() };
                 });
               } finally {
                 active.delete(id); if (sharedCheckout) nonWorktreeProjects.delete(project);
@@ -184,6 +247,8 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             })(); active.set(id, operation);
           }
         } catch (error) { console.error(`Skipping ${project}: ${String(error)}`); }
+        // Scan even when there are no new queue entries.
+        try { await reconcile(project); } catch (error) { console.error(`Status scan failed for ${project}: ${String(error)}`); }
       }
       if (once) break;
       await sleep(intervalMs);
