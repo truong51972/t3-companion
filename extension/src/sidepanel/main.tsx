@@ -48,10 +48,13 @@ function ServiceRefresh({ service, disabled, refreshing, onRefresh }: {
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  return <button type="button" className="service-refresh"
+  return <button type="button" className={'service-refresh' + (refreshing ? ' is-refreshing' : '')}
     aria-label={`Refresh ${service} status`} title={`Refresh ${service} status`}
     aria-busy={refreshing} disabled={disabled || refreshing} onClick={onRefresh}>
-    <span aria-hidden="true">↻</span>
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 11a8 8 0 1 0-2.4 5.7M20 4v7h-7"/>
+    </svg>
   </button>;
 }
 
@@ -62,7 +65,8 @@ function ServiceMore({ service, menuRef, children }: {
   children: React.ReactNode;
 }) {
   return <details className="service-more" ref={menuRef}>
-    <summary aria-label={`More ${service} actions`} title={`More ${service} actions`}>More <span aria-hidden="true">⌄</span></summary>
+    <summary aria-label={`More ${service} actions`} title={`More ${service} actions`}
+      aria-haspopup="menu"><span aria-hidden="true">···</span></summary>
     <div className="service-menu">{children}</div>
   </details>;
 }
@@ -983,23 +987,31 @@ function App() {
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {(runnerStatusError || runnerError) && <p className="runner-error" role="alert">Could not verify Runner: {runnerStatusError || runnerError}{runnerCacheAt ? ' (showing last known status)' : ''}</p>}
-        {runnerInstalled === 'true' && <p className="runner-hint">Version: {runnerVersion ? runnerVersion.slice(0, 10) : 'Legacy · not recorded'}{runnerCacheAt ? ' · Last verified ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>}
-        {runnerInstalled === 'true' && (runnerUpgradeRequired || !runnerScanInterval) && <p className="runner-hint">Update Runner to enable persistent scheduler settings and live workflow scanning.</p>}
-        {runnerInstalled === 'true' && !runnerBridgeMissing && <div className="runner-config" role="group" aria-label="Runner scheduler settings">
-          <label>Max concurrent
-            <select aria-label="Max concurrent Runner tasks" value={runnerMaxConcurrent}
-              disabled={busy || !runnerHostAvailable || !runnerScanInterval}
-              onChange={event => {
-                const count = event.target.value;
-                void action(async () => manageRunner('configure', count));
-              }}>
-              <option value="1">1 worker</option>
-              <option value="2">2 workers</option>
-              <option value="3">3 workers</option>
-            </select>
-          </label>
-          <span className="runner-hint">Global worker pool · scan every {runnerScanInterval ? Math.round(Number(runnerScanInterval) / 1000) + 's' : '10s'} · applies on next cycle</span>
-        </div>}
+        {runnerInstalled === 'true' && (runnerUpgradeRequired || !runnerScanInterval)
+          ? <div className="service-info service-info-upgrade">
+              <span>Legacy Runner · update to enable scheduler settings and workflow scanning.</span>
+              <button type="button" className="text-action" disabled={busy || runnerBusy || !runnerHostAvailable}
+                onClick={() => void action(async () => manageRunner('update'))}>Update</button>
+            </div>
+          : runnerInstalled === 'true' && !runnerBridgeMissing &&
+            <div className="runner-config" role="group" aria-label="Runner scheduler settings">
+              <label htmlFor="runner-max-concurrent">Max concurrent</label>
+              <select id="runner-max-concurrent" aria-label="Max concurrent Runner tasks" value={runnerMaxConcurrent}
+                disabled={busy || runnerBusy || !runnerHostAvailable || !runnerScanInterval}
+                onChange={event => {
+                  const count = event.target.value;
+                  void action(async () => manageRunner('configure', count));
+                }}>
+                <option value="1">1 worker</option>
+                <option value="2">2 workers</option>
+                <option value="3">3 workers</option>
+              </select>
+              <span className="runner-config-meta">Scan {runnerScanInterval ? Math.round(Number(runnerScanInterval) / 1000) + 's' : '10s'} · applies next cycle</span>
+            </div>}
+        {runnerInstalled === 'true' && <p className="service-meta">
+          {runnerVersion ? 'Build ' + runnerVersion.slice(0, 10) : 'Unversioned installation'}
+          {runnerCacheAt ? ' · Cached at ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}
+        </p>
         <div className="service-actions" aria-label="Runner controls">
           {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || runnerBusy || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('install'))}>
@@ -1010,11 +1022,12 @@ function App() {
               onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
           {runnerRunning === 'true' && <button disabled={busy || runnerBusy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
-          <ServiceRefresh service="Runner" refreshing={runnerBusy}
-            disabled={busy || !runnerHostAvailable}
-            onRefresh={() => void action(async () => manageRunner('status'))}/>
-          {runnerInstalled === 'true' && !runnerBridgeMissing &&
-            <ServiceMore service="Runner" menuRef={runnerActionsMenu}>
+          <div className="service-tools">
+            <ServiceRefresh service="Runner" refreshing={runnerBusy}
+              disabled={busy || !runnerHostAvailable}
+              onRefresh={() => void action(async () => manageRunner('status'))}/>
+            {runnerInstalled === 'true' && !runnerBridgeMissing &&
+              <ServiceMore service="Runner" menuRef={runnerActionsMenu}>
               <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
                 onClick={() => { runnerActionsMenu.current?.removeAttribute('open'); void action(async () => manageRunner('update')); }}>Update Runner</button>
               <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
@@ -1044,7 +1057,8 @@ function App() {
               <details className="service-help"><summary>Diagnostics</summary>
                 <pre className="runner-result">{runnerResult}</pre>
               </details>
-            </ServiceMore>}
+              </ServiceMore>}
+          </div>
         </div>
       </div>
           </div>
@@ -1057,18 +1071,18 @@ function App() {
             </span>
           </summary>
           <div className="overview-expander-body">
-            <p className="overview-description">Manage project tasks using the installed agent skill. Installation is scoped to this project.</p>
-            {skillCacheAt && <p className="runner-hint">Cached · Last verified {new Date(skillCacheAt).toLocaleTimeString()}</p>}
+            {skillCacheAt && <p className="service-meta">Last verified {new Date(skillCacheAt).toLocaleTimeString()} · Cached</p>}
             {skillError && <p className="runner-error" role="alert">{skillError}</p>}
             <div className="service-actions" aria-label="Agent Skill controls">
               {skillState !== 'installed' && <button className="primary"
                 disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
                 onClick={() => void action(async () => manageSkill('install'))}>{skillBusy ? 'Installing…' : 'Install Skill'}</button>}
-              <ServiceRefresh service="Agent Skill" refreshing={skillBusy || skillState === 'checking'}
-                disabled={busy || !tabId || !environmentId || !currentProject || !recognized}
-                onRefresh={() => void action(async () => manageSkill('status'))}/>
-              {skillState === 'installed' &&
-                <ServiceMore service="Agent Skill" menuRef={skillActionsMenu}>
+              <div className="service-tools">
+                <ServiceRefresh service="Agent Skill" refreshing={skillBusy || skillState === 'checking'}
+                  disabled={busy || !tabId || !environmentId || !currentProject || !recognized}
+                  onRefresh={() => void action(async () => manageSkill('status'))}/>
+                {skillState === 'installed' &&
+                  <ServiceMore service="Agent Skill" menuRef={skillActionsMenu}>
                   <button type="button" disabled={busy || skillBusy || !runnerHostAvailable}
                     onClick={() => { skillActionsMenu.current?.removeAttribute('open'); void action(async () => manageSkill('update')); }}>Update Skill</button>
                   <button type="button" disabled={busy || skillBusy || !runnerHostAvailable}
@@ -1080,13 +1094,14 @@ function App() {
                         confirmLabel: 'Re-install', run: async () => manageSkill('reinstall'),
                       });
                     }}>Re-install Skill</button>
-                </ServiceMore>}
+                  </ServiceMore>}
+              </div>
             </div>
-            <details className="service-help">
+            {skillState !== 'installed' && <details className="service-help">
               <summary>Manual setup</summary>
               <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
               <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
-            </details>
+            </details>}
           </div>
         </details>
         <details className="overview-expander data-settings">
