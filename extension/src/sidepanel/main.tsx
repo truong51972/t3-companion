@@ -66,7 +66,7 @@ function ServiceMore({ service, menuRef, children }: {
 }) {
   return <details className="service-more" ref={menuRef}>
     <summary aria-label={`More ${service} actions`} title={`More ${service} actions`}
-      aria-haspopup="menu"><span aria-hidden="true">···</span></summary>
+      ><span aria-hidden="true">···</span></summary>
     <div className="service-menu">{children}</div>
   </details>;
 }
@@ -1008,10 +1008,6 @@ function App() {
               </select>
               <span className="runner-config-meta">Scan {runnerScanInterval ? Math.round(Number(runnerScanInterval) / 1000) + 's' : '10s'} · applies next cycle</span>
             </div>}
-        {runnerInstalled === 'true' && <p className="service-meta">
-          {runnerVersion ? 'Build ' + runnerVersion.slice(0, 10) : 'Unversioned installation'}
-          {runnerCacheAt ? ' · Cached at ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}
-        </p>
         <div className="service-actions" aria-label="Runner controls">
           {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || runnerBusy || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('install'))}>
@@ -1055,6 +1051,7 @@ function App() {
                 <span>Auto-start when connected</span>
               </label>
               <details className="service-help"><summary>Diagnostics</summary>
+                <p className="service-meta">{runnerVersion ? 'Build ' + runnerVersion.slice(0, 10) : 'Unversioned installation'}{runnerCacheAt ? ' · Cached at ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>
                 <pre className="runner-result">{runnerResult}</pre>
               </details>
               </ServiceMore>}
@@ -1065,13 +1062,13 @@ function App() {
         </details>
         <details className="overview-expander">
           <summary><span className="overview-expander-title">Agent Skill</span>
-            <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}>
+            <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}
+              title={skillCacheAt ? 'Cached · Last verified ' + new Date(skillCacheAt).toLocaleTimeString() : undefined}>
               {skillState === 'installed' ? 'Installed' : skillState === 'not_installed' ? 'Not installed'
                 : skillState === 'checking' ? 'Checking…' : skillState === 'error' ? 'Error' : 'Unavailable'}
             </span>
           </summary>
           <div className="overview-expander-body">
-            {skillCacheAt && <p className="service-meta">Last verified {new Date(skillCacheAt).toLocaleTimeString()} · Cached</p>}
             {skillError && <p className="runner-error" role="alert">{skillError}</p>}
             <div className="service-actions" aria-label="Agent Skill controls">
               {skillState !== 'installed' && <button className="primary"
