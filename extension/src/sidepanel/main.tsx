@@ -163,6 +163,8 @@ function App() {
   const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
   const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
   const runnerVersion = /"version"\s*:\s*"([^"]+)"/.exec(runnerResult)?.[1];
+  const runnerMaxConcurrent = /"maxConcurrent"\s*:\s*([1-3])/.exec(runnerResult)?.[1] || '3';
+  const runnerScanInterval = /"scanIntervalMs"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerStarting ? 'Starting' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   // Cache is only a display hint. Live RPC validation remains authoritative.
@@ -644,7 +646,7 @@ function App() {
     setConfirmClear(false);
     window.location.reload();
   }
-  async function manageRunner(verb: 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
+  async function manageRunner(verb: 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove' | 'configure', target?: string) {
     if (!tabId || !currentProject) return;
     const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
     const hostProject = host && projects.find(p => p.id === host.projectId);
@@ -660,7 +662,7 @@ function App() {
         if (scopedKey.current === key) setRunnerAutoStart(enabled);
       }
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
-        ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
+        verb === 'configure' ? target : ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
         setRunnerResult(result); setRunnerCacheAt(null); setRunnerStatusError('');
         void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: result, verifiedAt: Date.now() } });
@@ -947,6 +949,21 @@ function App() {
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {(runnerStatusError || runnerError) && <p className="runner-error" role="alert">Could not verify Runner: {runnerStatusError || runnerError}{runnerCacheAt ? ' (showing last known status)' : ''}</p>}
         {runnerInstalled === 'true' && <p className="runner-hint">Version: {runnerVersion ? runnerVersion.slice(0, 10) : 'Legacy · not recorded'}{runnerCacheAt ? ' · Last verified ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>}
+        {runnerInstalled === 'true' && !runnerBridgeMissing && <div className="runner-config" role="group" aria-label="Runner scheduler settings">
+          <label>Max concurrent
+            <select aria-label="Max concurrent Runner tasks" value={runnerMaxConcurrent}
+              disabled={busy || !runnerHostAvailable || !runnerScanInterval}
+              onChange={event => {
+                const count = event.target.value;
+                void action(async () => manageRunner('configure', count));
+              }}>
+              <option value="1">1 worker</option>
+              <option value="2">2 workers</option>
+              <option value="3">3 workers</option>
+            </select>
+          </label>
+          <span className="runner-hint">Global worker pool · scan every {runnerScanInterval ? Math.round(Number(runnerScanInterval) / 1000) + 's' : '10s'} · applies on next cycle</span>
+        </div>}
         <div className="runner-toolbar">
           {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('install'))}>{runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up Runner controls' : 'Install & Start'}</button>}
