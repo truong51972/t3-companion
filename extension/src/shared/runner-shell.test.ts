@@ -150,6 +150,8 @@ test('update bootstraps a new controller before dispatching update to an install
     'runner/src/storage.ts': '// upgraded',
     'runner/src/workflow.ts': '// upgraded',
     'runner/src/t3-cli.ts': '// upgraded',
+    'runner/src/lock.ts': '// upgraded',
+    'runner/src/reconciler.ts': '// upgraded',
   };
   try {
     mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
@@ -234,6 +236,8 @@ test('upgrade keeps new Runner if restart is blocked only by missing host T3 CLI
     'runner/src/storage.ts': '// upgraded',
     'runner/src/workflow.ts': '// upgraded',
     'runner/src/t3-cli.ts': '// upgraded',
+    'runner/src/lock.ts': '// upgraded',
+    'runner/src/reconciler.ts': '// upgraded',
   };
   try {
     mkdirSync(path.join(root, 'runner', 'bin'), { recursive: true });
