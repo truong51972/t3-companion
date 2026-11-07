@@ -31,6 +31,19 @@ test('rare service operations remain under More and close after selection', () =
     assert.ok(skillMenu.includes(item), 'Skill More contains '+item);
   assert.match(code, /runnerActionsMenu\.current\?\.removeAttribute\('open'\)/);
   assert.match(code, /skillActionsMenu\.current\?\.removeAttribute\('open'\)/);
-  assert.match(css, /\.service-menu\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(css, /@media\(max-width:360px\)/);
+  assert.match(css, /\.overview-expander \.service-more\[open\]\{flex:0 0 30px;width:30px/);
+  assert.match(css, /\.overview-expander \.service-menu\{[\s\S]*?position:absolute;z-index:40/);
+  assert.match(css, /\.overview-expander \.service-menu\{[\s\S]*?width:228px/);
+  assert.match(css, /\.overview-expander \.service-menu>button\{[\s\S]*?width:100%/);
+  assert.match(css, /\.overview-expander \.service-actions\{[\s\S]*?flex-wrap:nowrap/);
+  assert.match(css, /@media\(max-width:420px\)/);
+});
+
+test('service panels do not show a disabled legacy setting or redundant metadata', () => {
+  assert.match(code, /Legacy Runner · update to enable scheduler settings and workflow scanning/);
+  assert.match(code, /runnerInstalled === 'true' && !runnerBridgeMissing &&/); // actions remain gated
+  assert.match(code, /runnerInstalled === 'true' && \(runnerUpgradeRequired \|\| !runnerScanInterval\)/);
+  assert.match(code, /<div className="service-tools">/);
+  assert.match(code, /<svg aria-hidden="true" viewBox="0 0 24 24"/);
+  assert.match(css, /\.overview-expander \.runner-config\{[\s\S]*?border:0;background:transparent/);
 });
