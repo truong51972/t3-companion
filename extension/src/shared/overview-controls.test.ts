@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function readSidepanelCode(dir: string): string {
   let content = '';
@@ -13,7 +14,7 @@ function readSidepanelCode(dir: string): string {
   return content;
 }
 
-const code = readSidepanelCode(new URL('../sidepanel', import.meta.url).pathname);
+const code = readSidepanelCode(fileURLToPath(new URL('../sidepanel', import.meta.url)));
 const css = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
 
 test('Runner and Agent Skill expander start collapsed and expose status in summary', () => {
