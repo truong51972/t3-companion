@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask } from '../src/storage.ts';
+import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask, readRunnerSettings, saveRunnerSettings } from '../src/storage.ts';
 import { runRunner, status, requestStop, workspaceBaseFor } from '../src/runner.ts';
 async function sandbox(t: any) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 't3-companion-'));
@@ -210,4 +210,67 @@ test('explicit root request stays serialized even with a baseRef field', async t
     return { status: 'completed' };
   }});
   assert.equal(peak, 1);
+});
+
+test('Runner settings persist and control the scheduler independently of browser preferences', async t => {
+  const { home, project } = await sandbox(t);
+  assert.deepEqual(await readRunnerSettings(home), { maxConcurrent: 3, scanIntervalMs: 10000 });
+  await assert.rejects(saveRunnerSettings({ maxConcurrent: 4, scanIntervalMs: 10000 }, home), /1\.\.3/);
+  await saveRunnerSettings({ maxConcurrent: 1, scanIntervalMs: 10000 }, home);
+  await registerProject(project, home);
+  for (let i = 0; i < 3; i++) await createTask(project, 'Task ' + i, 'work', 'main');
+  let active = 0, peak = 0;
+  const execute = async () => {
+    active++; peak = Math.max(active, peak);
+    await new Promise(resolve => setTimeout(resolve, 15));
+    active--;
+    return { status: 'completed' as const };
+  };
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 1);
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 1);
+  await saveRunnerSettings({ maxConcurrent: 2, scanIntervalMs: 10000 }, home);
+  peak = 0;
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 2);
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 3);
+});
+
+test('Runner rescans a waiting T3 thread, then follows open PR to merged Done', async t => {
+  const { home, project } = await sandbox(t);
+  await registerProject(project, home);
+  const task = await createTask(project, 'Implement change', 'Do the work', 'main');
+  const requestId = task.executionRequests![0].requestId;
+  let stage = 'human_review';
+  let calls = 0;
+  const inspect = async (_project: string, threadId: string) => {
+    assert.equal(threadId, 'thread-a');
+    return { stage: stage as 'human_review' | 'awaiting_merge' | 'done', pendingRequestCount: stage === 'human_review' ? 1 : 0,
+      changeRequests: stage === 'human_review' ? [] : [{ url: 'https://github.com/a/b/pull/1',
+        state: stage === 'done' ? 'merged' as const : 'open' as const }] };
+  };
+  await runRunner({ home, once: true, inspect, execute: async () => {
+    calls++;
+    return { status: 'blocked', threadId: 'thread-a' };
+  } });
+  let record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.status, 'blocked');
+  assert.equal(record.workflowStage, 'human_review');
+  stage = 'awaiting_merge';
+  record.lastInspectedAt = '2000-01-01T00:00:00.000Z';
+  const file = filesFor(project).runtime;
+  await atomicWrite(file, await readRuntime(project).then(doc => ({ ...doc, requests: { ...doc.requests, [requestId]: record } })));
+  await runRunner({ home, once: true, inspect, execute: async () => { calls++; return { status: 'completed' }; } });
+  record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.status, 'completed');
+  assert.equal(record.workflowStage, 'awaiting_merge');
+  stage = 'done';
+  record.lastInspectedAt = '2000-01-01T00:00:00.000Z';
+  await atomicWrite(file, await readRuntime(project).then(doc => ({ ...doc, requests: { ...doc.requests, [requestId]: record } })));
+  await runRunner({ home, once: true, inspect, execute: async () => { calls++; return { status: 'completed' }; } });
+  record = (await readRuntime(project)).requests[requestId];
+  assert.equal(record.workflowStage, 'done');
+  assert.equal(record.changeRequests?.[0]?.state, 'merged');
+  assert.equal(calls, 1, 'scanning must not re-run an agent task');
+  assert.equal((await readTasks(project)).tasks[0].status, 'todo', 'Runner must never mutate task definitions');
 });
