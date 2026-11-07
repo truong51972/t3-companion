@@ -214,7 +214,7 @@ test('upgrade keeps new Runner if restart is blocked only by missing host T3 CLI
   const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
   const stateFile = path.join(home, 'runner-state.txt');
   const previousRunner = [
-    "const fs=require('node:fs');",
+    "import fs from 'node:fs';",
     "const command=process.argv[2],state=process.env.RUNNER_TEST_STATE;",
     "if(command==='status')console.log(JSON.stringify({running:fs.readFileSync(state,'utf8')==='1'}));",
     "else if(command==='stop'){fs.writeFileSync(state,'0');console.log(JSON.stringify({requested:true}))}",
