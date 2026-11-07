@@ -177,7 +177,7 @@ test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async 
   await atomicWrite(filesFor(project).tasks, next);
   peak = 0;
   await runRunner({ home, once: true, execute });
-  assert.equal(peak, 2, 'Git auto workspace uses independent worktrees');
+  assert.equal(peak, 3, 'Git auto workspace uses the 3-worker pool');
   assert.equal(a.title, 'A'); assert.equal(b.title, 'B');
 });
 test('explicit root request stays serialized even with a baseRef field', async t => {
