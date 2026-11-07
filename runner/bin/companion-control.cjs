@@ -50,20 +50,63 @@ function run(command, ...args) {
 function isT3CliUnavailable(error) {
   return /T3 CLI not found|T3 CLI executable|T3_COMPANION_T3_BIN/i.test(String(error));
 }
+function isIncompleteInstall(error) {
+  // Only recover from missing module imports; an arbitrary CLI failure must
+  // not be treated as evidence that the Runner is stopped.
+  return /ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package/i.test(String(error));
+}
+function runnerHome() {
+  return path.resolve(process.env.T3_COMPANION_HOME ||
+    path.join(process.env.T3CODE_HOME || path.join(os.homedir(), '.t3'), 'runner'));
+}
+function lockStatus() {
+  try {
+    const owner = JSON.parse(fs.readFileSync(path.join(runnerHome(), 'runner.lock', 'owner.json'), 'utf8'));
+    if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) return { running: false, pid: null };
+    try { process.kill(owner.pid, 0); return { running: true, pid: owner.pid }; }
+    catch (error) {
+      if (error.code === 'EPERM') return { running: true, pid: owner.pid };
+      if (error.code === 'ESRCH') return { running: false, pid: null };
+      throw error;
+    }
+  } catch (error) {
+    if (error.code === 'ENOENT') return { running: false, pid: null };
+    // A corrupted lock must block update rather than overwrite live code.
+    throw new Error('Cannot verify Runner lock for recovery: ' + String(error));
+  }
+}
+function safeRunnerStatus() {
+  try { return run('status'); }
+  catch (error) {
+    if (!isIncompleteInstall(error)) throw error;
+    return { ...lockStatus(), incompleteInstall: true };
+  }
+}
+function requestRunnerStop() {
+  try { return run('stop'); }
+  catch (error) {
+    if (!isIncompleteInstall(error)) throw error;
+    // The process may have started before the incomplete upgrade. It still
+    // watches stop.json and must drain before any module is replaced.
+    fs.mkdirSync(runnerHome(), { recursive: true });
+    fs.writeFileSync(path.join(runnerHome(), 'stop.json'), JSON.stringify({ at: new Date().toISOString() }));
+    return { requested: true };
+  }
+}
 function installation() {
   try { return JSON.parse(fs.readFileSync(manifest, 'utf8')); }
   catch { return null; }
 }
 function state(extra = {}) {
   const installed = hasLegacyRunner();
-  return installed ? { ...run('status'), installed: true, upgradeRequired: !hasCurrentRunner(), version: installation()?.sha || null, ...extra }
+  return installed ? { ...safeRunnerStatus(), installed: true, upgradeRequired: !hasCurrentRunner(), version: installation()?.sha || null, ...extra }
     : { installed: false, running: false, pid: null, version: null, ...extra };
 }
 async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
   if (sourceRef !== 'main' && !/^[0-9a-f]{40}$/.test(sourceRef))
     throw new Error('Invalid Runner release ref: expected main or a full commit SHA');
   const installed = hasCurrentRunner();
-  const previous = hasLegacyRunner() ? run('status') : { running: false };
+  const previous = hasLegacyRunner() ? safeRunnerStatus() : { running: false };
   const previousInstall = installation();
   // An immutable build SHA needs no unauthenticated GitHub API request.
   // Resolve "main" only for distributed source archives built without .git.
@@ -90,11 +133,11 @@ async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
       await fsp.writeFile(target, await response.text(), { mode: 0o600 });
     }
     if (previous.running) {
-      run('stop');
+      requestRunnerStop();
       let stopped = false;
       for (let n = 0; n < 60; n++) {
         await new Promise(resolve => setTimeout(resolve, 500));
-        if (!run('status').running) { stopped = true; break; }
+        if (!safeRunnerStatus().running) { stopped = true; break; }
       }
       if (!stopped) throw new Error('Runner is still draining work. Update was not applied; retry when it stops.');
     }
@@ -148,7 +191,7 @@ async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
     // If the download or replacement failed after a graceful stop, restart
     // the intact old Runner whenever it is safe to do so.
     if (previous.running && hasLegacyRunner()) {
-      try { if (!run('status').running) run('start'); } catch { /* preserve original failure */ }
+      try { if (!safeRunnerStatus().running) run('start'); } catch { /* preserve original failure */ }
     }
     throw error;
   } finally {
