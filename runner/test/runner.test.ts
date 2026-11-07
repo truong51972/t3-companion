@@ -153,6 +153,57 @@ test('auto workspace resolves the selected Git branch, without hardcoded main', 
   assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'root', worktree: 'release' }), null);
   assert.equal(workspaceBaseFor(project, { requestId: 'x' }), null, 'legacy requests stay in root');
 });
+test('new task snapshots honor workspace, base ref and scheduled not-before', async t => {
+  const { project, home } = await sandbox(t);
+  await registerProject(project, home);
+  const task = await createTask(project, 'Configured', 'Do it');
+  const doc = await readTasks(project);
+  const configured = {
+    workspace: 'worktree' as const, baseRef: 'origin/main', branch: 'fix/task',
+    modelSelection: { instanceId: 'codex', model: 'gpt-6.1-sol' },
+    notBefore: new Date(Date.now() + 60_000).toISOString(),
+  };
+  doc.tasks[0].execution = { ...configured };
+  doc.tasks[0].executionRequests![0] = {
+    requestId: task.executionRequests![0].requestId,
+    execution: { ...configured }, notBefore: configured.notBefore,
+  };
+  await atomicWrite(filesFor(project).tasks, doc);
+  let called = false;
+  await runRunner({ home, once: true, execute: async () => {
+    called = true; return { status: 'completed' };
+  } });
+  assert.equal(called, false);
+  const read = await readTasks(project);
+  assert.deepEqual(read.tasks[0].executionRequests![0].execution, configured);
+});
+
+test('T3 CLI receives the configured model, title and no injected shell parsing',
+  { skip: process.platform === 'win32' ? 'POSIX shebang executable' : false }, async t => {
+  const { project, home } = await sandbox(t);
+  const mock = path.join(path.dirname(home), 'mock-t3-model');
+  await fs.writeFile(mock, `#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>console.log(JSON.stringify({status:'completed',threadId:'one',reply:JSON.stringify(process.argv.slice(2))})));\n`, { mode: 0o700 });
+  const previous = process.env.T3_COMPANION_T3_BIN;
+  process.env.T3_COMPANION_T3_BIN = mock;
+  try {
+    const { executeT3 } = await import('../src/runner.ts');
+    const task = { id: 'task-1', title: 'Fix tests', status: 'todo' as const, prompt: 'Fix tests' };
+    const request = { requestId: 'req-1', execution: {
+      workspace: 'root' as const, modelSelection: { instanceId: 'codex', model: 'gpt-6.1-sol' },
+    }};
+    const result = await executeT3(project, task, request);
+    const args = JSON.parse(result.reply!);
+    assert.deepEqual(args.slice(0,4), ['thread','start',project,'-']);
+    assert.equal(args[args.indexOf('--title') + 1], 'Fix tests');
+    assert.equal(args[args.indexOf('--provider') + 1], 'codex');
+    assert.equal(args[args.indexOf('--model') + 1], 'gpt-6.1-sol');
+    assert.equal(args.includes('--worktree'), false);
+  } finally {
+    if (previous === undefined) delete process.env.T3_COMPANION_T3_BIN;
+    else process.env.T3_COMPANION_T3_BIN = previous;
+  }
+});
+
 test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async t => {
   const { project, home } = await sandbox(t);
   await registerProject(project, home);
