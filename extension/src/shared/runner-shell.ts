@@ -4,7 +4,7 @@
  * Only the first installation downloads it; ordinary commands are short and
  * readable, with no eval, base64-encoded programs, or shell-specific syntax.
  */
-export type RunnerVerb = 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove';
+export type RunnerVerb = 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove' | 'configure';
 export const RUNNER_SOURCE_REF = 'main';
 export const CONTROL_SOURCE_REF = 'main';
 
@@ -42,6 +42,7 @@ function encodeTarget(target: string): string {
 export function runnerShellCommand(verb: RunnerVerb, target: string | undefined, marker: string): string {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
   if ((verb === 'add' || verb === 'remove') && !target) throw new Error('Project path required');
+  if (verb === 'configure' && !/^[1-3]$/.test(target || '')) throw new Error('Max concurrent must be 1..3');
   const args = [verb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
   return 'node -e "' + (['install', 'update', 'reinstall'].includes(verb) ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
 }
