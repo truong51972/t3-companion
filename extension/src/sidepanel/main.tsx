@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { describeEnvironment, installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
+import { installProjectSkill, isProjectSkillInstalled, isRecognizedTab, listSessionEnvironments, readProjectJson, runnerCommand, shell, writeProjectJson } from '../bridge/t3-bridge';
 import { isSafeOrigin, isT3Web } from '../shared/t3-site';
 import { environmentThreadUrl } from '../shared/environment-routing';
 import { selectT3Tab } from '../shared/tab-selection';
@@ -65,6 +65,8 @@ function App() {
   const [sessionEnvironments, setSessionEnvironments] = useState<SessionEnvironment[]>([]);
   const [manualEnvironmentId, setManualEnvironmentId] = useState('');
   const scopedKey = useRef('');
+  const shellReadyScope = useRef('');
+  const shellSnapshot = useRef<{ projects: Project[]; threads: Thread[] }>({ projects: [], threads: [] });
   const refreshVersion = useRef(0);
   const [recognized, setRecognized] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -150,7 +152,9 @@ function App() {
     const version = ++shellVersion.current;
     const next = await shell(id, environmentId);
     if (version !== shellVersion.current) return;
-    setProjects(next.projects); setThreads(next.threads);
+    shellSnapshot.current = next;
+    setProjects(old => JSON.stringify(old) === JSON.stringify(next.projects) ? old : next.projects);
+    setThreads(old => JSON.stringify(old) === JSON.stringify(next.threads) ? old : next.threads);
     // Match a thread id from the authenticated shell to a complete URL segment.
     // The URL is an orientation hint, not authentication or a DOM-based guess.
     const segments = url ? new URL(url).pathname.split('/') : [];
@@ -173,7 +177,7 @@ function App() {
     if (version !== filesVersion.current || scopedKey.current !== key) return;
     setTasks(checkedTasks); setRuntime(checkedRuntime);
   }, []);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceShell = false) => {
     const version = ++refreshVersion.current;
     setBusy(true); setError('');
     try {
@@ -197,14 +201,18 @@ function App() {
       // unrelated pages. Manual tab selection always takes precedence.
       const tab = selectT3Tab(eligible, manualTabId, selectedTabRef.current);
       if (!tab?.id || !tab.url || !await isRecognizedTab(tab)) throw new Error('Open and verify a T3 Web tab to connect.');
-      // The selected T3 tab can contain multiple authenticated remote environments.
+      // One session snapshot supplies both environment choices and the current route.
       const session = await listSessionEnvironments(tab.id);
       if (version !== refreshVersion.current) return;
-      setSessionEnvironments(session.environments);
-      const descriptor = await describeEnvironment(tab.id, manualEnvironmentId);
-      if (version !== refreshVersion.current) return;
+      setSessionEnvironments(old => JSON.stringify(old) === JSON.stringify(session.environments) ? old : session.environments);
+      const target = manualEnvironmentId || session.routeEnvironmentId ||
+        session.environments.find(item => item.source === 'direct')?.environmentId ||
+        (session.environments.length === 1 ? session.environments[0]!.environmentId : '');
+      const descriptor = session.environments.find(item => item.environmentId === target);
+      if (!descriptor) throw new Error('Select a T3 environment in Companion or open a T3 thread.');
       const key = tab.id + ':' + descriptor.environmentId;
-      if (scopedKey.current !== key) {
+      const scopeChanged = scopedKey.current !== key;
+      if (scopeChanged) {
         scopedKey.current = key;
         ++filesVersion.current; ++shellVersion.current;
         manualProject.current = false;
@@ -218,10 +226,20 @@ function App() {
       }
       setTabId(tab.id); setTabUrl(tab.url); setEnvironmentId(descriptor.environmentId);
       setEnvironmentLabel(descriptor.label); setRecognized(true);
-      await refreshShell(tab.id, tab.url, descriptor.environmentId);
+      if (forceShell || scopeChanged || shellReadyScope.current !== key) {
+        await refreshShell(tab.id, tab.url, descriptor.environmentId);
+        if (version !== refreshVersion.current) return;
+        shellReadyScope.current = key;
+      } else if (!manualProject.current) {
+        const segments = new URL(tab.url).pathname.split('/');
+        const active = shellSnapshot.current.threads.find(thread => segments.includes(thread.id));
+        if (active && shellSnapshot.current.projects.some(project => project.id === active.projectId))
+          setProjectId(old => old === active.projectId ? old : active.projectId);
+      }
     } catch (e) {
       if (version !== refreshVersion.current) return;
       ++filesVersion.current; ++shellVersion.current;
+      shellReadyScope.current = ''; shellSnapshot.current = { projects: [], threads: [] };
       setRecognized(false); setProjects([]); setThreads([]); setProjectId('');
       setTasks(emptyTasks()); setRuntime(emptyRuntime()); setRunnerResult('Not checked');
       setEnvironmentId(''); setEnvironmentLabel(''); setTabId(null); scopedKey.current = ''; setNotice('');
@@ -237,10 +255,10 @@ function App() {
     const key = scopedKey.current;
     void refreshFiles(tabId, environmentId, currentProject).catch(e => { if (active && scopedKey.current === key) setError(String(e)); });
     return () => { active = false; filesVersion.current++; };
-  }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject]);
+  }, [tabId, environmentId, projectId, recognized, refreshFiles, currentProject?.workspaceRoot]);
   useEffect(() => {
     const changed = ({ tabId: activeId }: chrome.tabs.OnActivatedInfo) => {
-      if (manualTabId !== null) return;
+      if (manualTabId !== null || activeId === selectedTabRef.current) return;
       // An unrelated website is not a reason to discard an authenticated T3 session.
       void (async () => {
         try {
@@ -252,8 +270,11 @@ function App() {
         } catch { /* tab closed during activation */ }
       })();
     };
+    let updateTimer: ReturnType<typeof setTimeout> | null = null;
     const updated = (id: number, change: { url?: string; status?: string }) => {
-      if (id === (manualTabId ?? selectedTabRef.current) && (change.url || change.status === 'complete')) void refresh();
+      if (id !== (manualTabId ?? selectedTabRef.current) || (!change.url && change.status !== 'complete')) return;
+      if (updateTimer) clearTimeout(updateTimer);
+      updateTimer = setTimeout(() => { updateTimer = null; void refresh(); }, 180);
     };
     const removed = (id: number) => {
       if (id === manualTabId) setManualTabId(null);
@@ -269,6 +290,7 @@ function App() {
       chrome.tabs.onActivated.removeListener(changed);
       chrome.tabs.onUpdated.removeListener(updated);
       chrome.tabs.onRemoved.removeListener(removed);
+      if (updateTimer) clearTimeout(updateTimer);
     };
   }, [refresh, manualTabId]);
 
@@ -283,7 +305,7 @@ function App() {
     runnerCheckedScope.current = scope;
     const flag = 'runnerAutoStartDisabled:' + environmentId;
     let active = true;
-    void (async () => {
+    const timer = setTimeout(() => { void (async () => {
       try {
         const saved = await chrome.storage.local.get(flag);
         const enabled = saved[flag] !== true;
@@ -306,8 +328,8 @@ function App() {
       } finally {
         runnerActionInFlight.current = false;
       }
-    })();
-    return () => { active = false; };
+    })(); }, 250);
+    return () => { active = false; clearTimeout(timer); };
   }, [tabId, environmentId, recognized, runnerHost?.id, runnerHostProject?.id]);
 
   // Skill checks are read-only project RPC calls; avoid extra terminal history.
@@ -354,11 +376,10 @@ function App() {
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
-    const selectedProjectId = projectId;
     setBusy(true); setError(''); setNotice('');
     try {
       await f();
-      if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) await refreshFiles(tabId, environmentId, currentProject);
+      // The action already updates its own state; avoid redundant project reads.
     } catch (e) { if (scopedKey.current === key) setError(String(e)); }
     finally { if (scopedKey.current === key) setBusy(false); }
   }
@@ -371,7 +392,11 @@ function App() {
     validateTasks(next);
     const key = scopedKey.current;
     await writeProjectJson(tabId, environmentId, currentProject.workspaceRoot, 'tasks.json', next);
-    if (scopedKey.current === key) setNotice('Saved to .t3/tasks.json');
+    if (scopedKey.current === key && projectSelectionRef.current === projectId) {
+      ++filesVersion.current; // invalidate older asynchronous file refreshes
+      setTasks(next);
+      setNotice('Saved to .t3/tasks.json');
+    }
   }
   function edit(task?: Task) { const value = task ? structuredClone(task) : blank(); setEditing(value); setDraft(value); }
   function requestExecution(task: Task) { setSchedule(''); setWorktree(''); setQueueTarget(task); }
@@ -496,67 +521,9 @@ function App() {
       connectionMenu.current?.removeAttribute('open');
     } catch (e) { setError(String(e)); }
   }
-  return <main className="stack sidepanel">
-    <header className="header">
-      <div className="header-toolbar">
-        <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
-        <div className="header-actions">
-          <span className={'connection ' + (recognized ? 'connected' : 'disconnected')} title={recognized ? 'T3 connected' : 'T3 offline'} aria-label={recognized ? 'T3 connected' : 'T3 offline'}><span className="status-dot"/></span>
-          <details className="connection-settings" ref={connectionMenu}>
-            <summary className="icon-button" aria-label="Connection settings" title="Connection settings">⚙</summary>
-            <div className="connection-menu">
-              <label htmlFor="source-tab">T3 Web session tab
-                <select id="source-tab" aria-label="T3 Web session tab" disabled={busy}
-                  value={manualTabId === null ? 'auto' : String(manualTabId)}
-                  onChange={e => void selectEnvironmentTab(e.target.value)}>
-                  <option value="auto">Auto (active T3 tab)</option>
-                  {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
-                    {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
-                  </option>)}
-                </select>
-              </label>
-              <p className="runner-hint">Uses the active T3 tab, or keeps the last connection when browsing other sites. Select a tab here to override.</p>
-              {recognized && <p className="runner-hint">Connected via {tabUrl ? new URL(tabUrl).host : 'T3 Web'}</p>}
-            </div>
-          </details>
-          <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh connection" disabled={busy} onClick={() => void refresh()}>↻</button>
-        </div>
-      </div>
-      <div className="context-row" role="group" aria-label="T3 workspace context">
-        <label className="context-field" htmlFor="session-environment">
-          <span>Environment</span>
-          <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
-            value={manualEnvironmentId || 'auto'} title={environmentLabel || 'Follow current T3 thread'}
-            onChange={e => setManualEnvironmentId(e.target.value === 'auto' ? '' : e.target.value)}>
-            <option value="auto">{environmentLabel ? 'Current · ' + environmentLabel : 'Follow T3 thread'}</option>
-            {sessionEnvironments.map(env => <option key={env.environmentId} value={env.environmentId}>
-              {env.label} · {env.source === 'direct' ? 'Direct' : 'T3 session'}
-            </option>)}
-          </select>
-        </label>
-        <label className="context-field" htmlFor="project">
-          <span>Project</span>
-          <select id="project" aria-label="Project" title={currentProject?.workspaceRoot || 'Select project'} value={projectId} disabled={busy || projects.length === 0}
-            onChange={e => { manualProject.current = true; setProjectId(e.target.value); }}>
-            {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>) : <option value="">No project</option>}
-          </select>
-        </label>
-      </div>
-    </header>
-    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','overview'] as Page[]).map(p =>
-      <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
-        onClick={() => setPage(p)}>
-        {p === 'kanban' ? 'Board' : 'Overview'}
-      </button>)}</nav>
-    {error && <p className="notice" role="alert">{error}</p>}
-    {notice && <p className="notice success" role="status">{notice}</p>}
-    {!recognized ? <section className="empty-view">
-      <h2>Connect to T3 Code</h2>
-      <p className="muted">Open a T3 Web tab with an authenticated environment. Companion uses that tab's existing session; on the T3 home page, select an environment above.</p>
-      <button onClick={() => void refresh()}>Retry detection</button>
-    </section>
-    : !currentProject || tabId === null ? <section className="empty-view"><p>No projects found in this T3 environment.</p></section>
-    : page === 'kanban' ? <section className="kanban-view">
+  // Memoize the entire Board tree so editing a draft does not reconcile every
+  // task card on each keystroke; dependency changes still update active controls.
+  const board = useMemo(() => (<section className="kanban-view">
       <div className="view-header">
         <div className="view-title"><h2>Board</h2><span className="muted">{tasks.tasks.length} {tasks.tasks.length === 1 ? 'task' : 'tasks'}</span></div>
         <div className="board-actions">
@@ -574,7 +541,7 @@ function App() {
         </div>
       ) : (
       <div className="board-scroll">
-        <div className={'board' + (compactBoard ? ' is-compact' : '')}>{columns.map(column => {
+        <div className="board">{columns.map(column => {
           const laneTasks = tasks.tasks.filter(t => t.status === column.key).sort((a,b) => (a.priority || 2) - (b.priority || 2));
           const expanded = !compactBoard || (laneTasks.length > 0 && expandedLanes[column.key]);
           const laneHeading = <>
@@ -630,8 +597,71 @@ function App() {
         })}</div>
       </div>
       )}
+    </section>), [
+    tasks, runtime, busy, projectId, tabId, environmentId, tabUrl, threads, projects, currentProject?.workspaceRoot,
+    compactBoard, expandedLanes,
+  ]);
+  return <main className="stack sidepanel">
+    <header className="header">
+      <div className="header-toolbar">
+        <div className="brand"><span className="brand-mark">T3</span><strong>Companion</strong></div>
+        <div className="header-actions">
+          <span className={'connection ' + (recognized ? 'connected' : 'disconnected')} title={recognized ? 'T3 connected' : 'T3 offline'} aria-label={recognized ? 'T3 connected' : 'T3 offline'}><span className="status-dot"/></span>
+          <details className="connection-settings" ref={connectionMenu}>
+            <summary className="icon-button" aria-label="Connection settings" title="Connection settings">⚙</summary>
+            <div className="connection-menu">
+              <label htmlFor="source-tab">T3 Web session tab
+                <select id="source-tab" aria-label="T3 Web session tab" disabled={busy}
+                  value={manualTabId === null ? 'auto' : String(manualTabId)}
+                  onChange={e => void selectEnvironmentTab(e.target.value)}>
+                  <option value="auto">Auto (active T3 tab)</option>
+                  {tabChoices.map(tab => <option key={tab.id} value={tab.id}>
+                    {new URL(tab.url!).host} · {tab.title?.slice(0, 38) || 'T3 Web'}
+                  </option>)}
+                </select>
+              </label>
+              <p className="runner-hint">Uses the active T3 tab, or keeps the last connection when browsing other sites. Select a tab here to override.</p>
+              {recognized && <p className="runner-hint">Connected via {tabUrl ? new URL(tabUrl).host : 'T3 Web'}</p>}
+            </div>
+          </details>
+          <button className="icon-button" type="button" aria-label="Refresh T3 connection" title="Refresh connection" disabled={busy} onClick={() => void refresh(true)}>↻</button>
+        </div>
+      </div>
+      <div className="context-row" role="group" aria-label="T3 workspace context">
+        <label className="context-field" htmlFor="session-environment">
+          <span>Environment</span>
+          <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
+            value={manualEnvironmentId || 'auto'} title={environmentLabel || 'Follow current T3 thread'}
+            onChange={e => setManualEnvironmentId(e.target.value === 'auto' ? '' : e.target.value)}>
+            <option value="auto">{environmentLabel ? 'Current · ' + environmentLabel : 'Follow T3 thread'}</option>
+            {sessionEnvironments.map(env => <option key={env.environmentId} value={env.environmentId}>
+              {env.label} · {env.source === 'direct' ? 'Direct' : 'T3 session'}
+            </option>)}
+          </select>
+        </label>
+        <label className="context-field" htmlFor="project">
+          <span>Project</span>
+          <select id="project" aria-label="Project" title={currentProject?.workspaceRoot || 'Select project'} value={projectId} disabled={busy || projects.length === 0}
+            onChange={e => { manualProject.current = true; setProjectId(e.target.value); }}>
+            {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>) : <option value="">No project</option>}
+          </select>
+        </label>
+      </div>
+    </header>
+    <nav className="section-tabs" aria-label="Companion sections">{(['kanban','overview'] as Page[]).map(p =>
+      <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
+        onClick={() => setPage(p)}>
+        {p === 'kanban' ? 'Board' : 'Overview'}
+      </button>)}</nav>
+    {error && <p className="notice" role="alert">{error}</p>}
+    {notice && <p className="notice success" role="status">{notice}</p>}
+    {!recognized ? <section className="empty-view">
+      <h2>Connect to T3 Code</h2>
+      <p className="muted">Open a T3 Web tab with an authenticated environment. Companion uses that tab's existing session; on the T3 home page, select an environment above.</p>
+      <button onClick={() => void refresh()}>Retry detection</button>
     </section>
-    : <section className="overview-view">
+    : !currentProject || tabId === null ? <section className="empty-view"><p>No projects found in this T3 environment.</p></section>
+    : page === 'kanban' ? board : <section className="overview-view">
       <div className="view-header">
         <div className="view-title"><h2>Overview</h2><span className="muted">{currentProject.title}</span></div>
         <button type="button" className="runner-refresh" aria-label="Refresh project overview" title="Refresh overview" disabled={busy}

@@ -53,6 +53,10 @@ function mockTab(data: Catalog, key: unknown = null, path = '/env-b/thread-1') {
   return {
     set,
     restore() {
+      const key = Symbol.for('t3-companion.page-rpc.v1');
+      const connection = (globalThis as any)[key];
+      connection?.dispose('Test cleanup');
+      Reflect.deleteProperty(globalThis, key);
       for (const [name, descriptor] of saved) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
         else Reflect.deleteProperty(globalThis, name);
@@ -69,6 +73,8 @@ function json(status: number, value: unknown) {
 
 function fakeSocket(mock: ReturnType<typeof mockTab>, urls: string[]) {
   class Socket {
+    static OPEN = 1;
+    readyState = 1;
     onopen: (() => void) | null = null;
     onclose: (() => void) | null = null;
     onerror: (() => void) | null = null;
@@ -86,7 +92,7 @@ function fakeSocket(mock: ReturnType<typeof mockTab>, urls: string[]) {
         }]),
       }));
     }
-    close() {}
+    close() { this.readyState = 3; }
   }
   mock.set('WebSocket', Socket);
 }
@@ -141,11 +147,13 @@ test('uses bearer pairing without leaking credential or ticket to the Side Panel
   const mock = mockTab(data);
   const urls: string[] = [];
   let authorization = '';
+  let ticketRequests = 0;
   try {
     mock.set('fetch', async (url: string, init?: RequestInit) => {
       if (url === 'https://paired.example/.well-known/t3/environment')
         return json(200, { environmentId: 'env-b' });
       if (url === 'https://paired.example/api/auth/websocket-ticket/rpc') {
+        ticketRequests++;
         authorization = new Headers(init?.headers).get('authorization') || '';
         return json(200, { ticket: 'ONE-TIME-TICKET' });
       }
@@ -157,6 +165,10 @@ test('uses bearer pairing without leaking credential or ticket to the Side Panel
     assert.equal(authorization, 'Bearer BEARER-SECRET');
     assert.equal(new URL(urls[0]!).searchParams.get('wsTicket'), 'ONE-TIME-TICKET');
     assert.equal((result.value as any).projects[0].id, 'p-b');
+    const again = await pageOperation('rpc', 'env-b', 'orchestration.subscribeShell', {}, 1000);
+    assert.equal(again.ok, true, again.error);
+    assert.equal(urls.length, 1, 'requests should share one WebSocket');
+    assert.equal(ticketRequests, 1, 'only one ticket should be issued');
     assert.ok(!JSON.stringify(result).includes('BEARER-SECRET'));
     assert.ok(!JSON.stringify(result).includes('ONE-TIME-TICKET'));
   } finally { mock.restore(); }
@@ -204,5 +216,70 @@ test('uses stored T3 DPoP signing key for ticket and WebSocket upgrade', async (
     assert.equal(claims.ath, createHash('sha256').update('ONE-TIME-TICKET').digest('base64url'));
     assert.ok(!JSON.stringify(result).includes('DPOP-SECRET'));
     assert.ok(!JSON.stringify(result).includes('ONE-TIME-TICKET'));
+  } finally { mock.restore(); }
+});
+
+test('multiplexes concurrent requests over a single socket and isolates environments', async () => {
+  const data = catalog();
+  for (const name of ['env-b', 'env-c']) {
+    data.targets.push({ _tag: 'BearerConnectionTarget', environmentId: name, connectionId: name });
+    data.profiles.push({ connectionId: name, httpBaseUrl: 'https://' + name + '.example/', wsBaseUrl: 'wss://' + name + '.example/' });
+    data.credentials.push({ connectionId: name, credential: { token: 'BEARER-' + name } });
+  }
+  const mock = mockTab(data);
+  const urls: string[] = [];
+  let tickets = 0;
+  try {
+    mock.set('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/.well-known/t3/environment') return json(404, {});
+      if (url.endsWith('/.well-known/t3/environment'))
+        return json(200, { environmentId: new URL(url).hostname.split('.')[0] });
+      if (init?.method === 'POST') { tickets++; return json(200, { ticket: 'TICKET-' + tickets }); }
+      return json(404, {});
+    });
+    fakeSocket(mock, urls);
+    const [first, second] = await Promise.all([
+      pageOperation('rpc', 'env-b', 'orchestration.subscribeShell', {}, 1000),
+      pageOperation('rpc', 'env-b', 'orchestration.subscribeShell', {}, 1000),
+    ]);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(tickets, 1);
+    assert.equal(urls.length, 1);
+    const switched = await pageOperation('rpc', 'env-c', 'orchestration.subscribeShell', {}, 1000);
+    assert.equal(switched.ok, true, switched.error);
+    assert.equal(urls.length, 2, 'switching environment must not reuse the previous socket');
+    assert.equal(new URL(urls[1]!).hostname, 'env-c.example');
+  } finally { mock.restore(); }
+});
+
+test('times out a silent request without leaking a pending request', async () => {
+  const data = catalog();
+  data.targets.push({ environmentId: 'env-b', connectionId: 'paired' });
+  data.profiles.push({ connectionId: 'paired', httpBaseUrl: 'https://paired.example/', wsBaseUrl: 'wss://paired.example/' });
+  data.credentials.push({ connectionId: 'paired', credential: { token: 'BEARER' } });
+  const mock = mockTab(data);
+  try {
+    mock.set('fetch', async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/.well-known/t3/environment')) return json(200, { environmentId: 'env-b' });
+      if (init?.method === 'POST') return json(200, { ticket: 'TICKET' });
+      return json(404, {});
+    });
+    class SilentSocket {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() { queueMicrotask(() => this.onopen?.()); }
+      send() {}
+      close() { this.readyState = 3; }
+    }
+    mock.set('WebSocket', SilentSocket);
+    const result = await pageOperation('rpc', 'env-b', 'projects.readFile', {}, 20);
+    assert.match(result.error || '', /timed out/);
+    const connection = (globalThis as any)[Symbol.for('t3-companion.page-rpc.v1')];
+    assert.equal(connection.pending.size, 0);
   } finally { mock.restore(); }
 });

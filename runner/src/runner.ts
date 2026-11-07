@@ -140,8 +140,11 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             const operation = (async () => {
               try {
                 const result = await execute(project, task, request);
+                // Full agent replies belong in T3 threads, not the Side Panel's
+                // repeatedly-read runtime.json. Keep only execution metadata.
+                const { reply: _reply, ...summary } = result;
                 await updateRuntime(project, updated => {
-                  updated.requests[request.requestId] = { ...updated.requests[request.requestId], ...result, finishedAt: new Date().toISOString() };
+                  updated.requests[request.requestId] = { ...updated.requests[request.requestId], ...summary, finishedAt: new Date().toISOString() };
                 });
               } catch (error) {
                 await updateRuntime(project, updated => {

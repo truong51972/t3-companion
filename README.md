@@ -38,7 +38,7 @@ Choose a T3 project, manage tasks on the default **Board** tab, and inspect **Ov
 Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment host.
 
 1. Open a T3 thread in the environment and select the project in Companion.
-2. Open **Overview → Runner**. The Side Panel checks its status automatically.
+2. Open **Overview → Runner**. The Side Panel checks its status automatically after the initial UI render.
 3. If missing, click **Install & Start Runner**. Companion first fetches a fixed control adapter from a pinned commit, then installs the four pinned Runner source files into the selected host's user-level `~/.t3/companion/` (Windows: `%USERPROFILE%\\.t3\\companion\\`). Existing Runner source files are retained. No Git clone, global npm link, service, or shell-specific setup is needed. A previously installed Runner without the adapter shows **Setup required**; choose **Set up Runner controls** once.
 4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
@@ -48,7 +48,7 @@ Runner control reuses the selected environment's authenticated T3 Terminal RPC, 
 
 **Known MVP limitation — shell history:** T3's available terminal RPC uses a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a headless command endpoint. Companion invokes a short Node launcher for routine Runner actions and a fixed project-scoped `npx skills add` wrapper. Only target paths are encoded as inert base64url arguments; no executable JavaScript is base64-encoded or evaluated. The host shell may retain these commands in PowerShell/Bash/Zsh history; Companion never alters history.
 
-**Known browser limitation — Side Panel width:** Edge/Chromium owns the resizable Side Panel frame; extensions cannot read or set its width using `chrome.sidePanel`. Companion avoids redundant `setOptions()` calls, but switching away from a T3-enabled tab may still cause Edge to hide/recreate the tab-scoped panel and reset the resized width. This is not controlled by CSS or extension storage. A global/window-wide panel could change the lifecycle but would also change the T3-only visibility behavior.
+**Side Panel lifecycle and width:** Companion now uses a **window-scoped** Side Panel instead of a tab-scoped panel. Switching to another tab should no longer trigger a tab-specific panel teardown; the UI keeps the last selected verified T3 session while browsing unrelated sites. Edge/Chromium still owns the resizable Side Panel frame; extensions cannot set its width via `chrome.sidePanel`, so actual width persistence remains browser-dependent.
 
 The Runner sources remain pinned to commit `5ae13b7b08e78668dfc5ffb290fc958cc00c6bf8`. The control adapter is separately pinned to commit `715b00ce618ab821ee308bd5566723b9782b521d`. This is a one-time bootstrap; future control updates require an explicit **Set up Runner controls** action (or a later update flow), not background downloads.
 
@@ -71,8 +71,8 @@ The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks
 ### One-pass browser acceptance checklist
 
 1. Build, load `extension/dist/`, confirm popup shows version and recognizes `http://localhost:3773`.
-2. Visit T3 through custom `https://<your-cloudflare-domain>/`; click the Companion icon, check **Detected** and open Side Panel. On unrelated HTTPS pages it must stay disabled.
-3. Switch between T3 chats and verify Side Panel remains visible; choose another project from the dropdown.
+2. Visit T3 through custom `https://<your-cloudflare-domain>/`; click the Companion icon, check **Detected** and open Side Panel. The popup must not start a new connection from an unverified site; an already-open window Side Panel remains available when switching tabs.
+3. Switch between T3 chats and unrelated tabs; verify that the window Side Panel stays mounted (no reload) and the selected T3 session is retained; choose another project from the dropdown.
 4. Create a task with title/description/prompt/priority; refresh; verify it persisted in `.t3/tasks.json`.
 5. Edit title, change column, delete a test task; ensure the board reflects the changes.
 6. Queue a task with optional future time and `main` worktree; inspect `.t3/tasks.json` and check the Runner picks up only eligible requests.
@@ -95,3 +95,9 @@ The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks
 - Every request binds to the selected session environment and checks the actual target's `/.well-known/t3/environment` descriptor before sending credentials.
 - Hosted T3 Connect saved authorization is reused via an internal IndexedDB/DPoP compatibility adapter, not T3's live WebSocket connection. T3 Web remains responsible for token refresh. See [multi-environment decision](docs/multi-environment.md).
 - This is a beta implementation; live T3 integration and Edge/Chrome tests are to be performed on the user's host. Run local checks with `npm test`, `npm run typecheck:extension`, `npm run build:extension`.
+
+### Responsiveness and diagnostics
+
+The Side Panel now avoids repeated Shell RPCs when the selected tab/environment is unchanged, coalesces navigation-triggered refreshes, and updates Board state after successful task writes instead of immediately re-reading both JSON files. A window-scoped panel retains UI state while changing tabs. Its page-world adapter multiplexes requests over one reusable WebSocket per selected environment, closes failed connections, and idles out unused sockets after 90 seconds; no ticket or credential is copied into extension storage. Runner status remains a one-shot terminal operation, deferred until the initial UI has rendered.
+
+To profile real browser behavior, open DevTools for **the Side Panel** (Edge/Chrome extensions page → inspect views). Record time from panel open to Board interaction and test switching tabs, projects, editing a task, opening Overview, and refreshing Runner. Also inspect the T3 Web tab's Network → WS to verify repeated file RPCs reuse a single connection; one new WebSocket after idle timeout or environment switch is expected. Compare localhost and remote T3 with the same task data, and check that failures/timeouts recover after the next action. Automated tests cover socket sharing and connection isolation, but CI does not measure interactive browser latency.

@@ -32,6 +32,7 @@ test('dispatch once and preserve kanban status independently of runtime', async 
   await runRunner({ home, once: true, execute }); await runRunner({ home, once: true, execute });
   assert.equal(called, 1);
   assert.equal((await readTasks(project)).tasks[0].status, 'todo');
+  assert.equal((await readRuntime(project)).requests[task.executionRequests![0].requestId].reply, undefined, 'runtime should not duplicate full T3 replies');
   assert.equal((await readRuntime(project)).requests[task.executionRequests![0].requestId].threadId, 'thread-42');
 });
 test('existing dispatching request becomes needs_reconciliation and is not retried', async t => {
