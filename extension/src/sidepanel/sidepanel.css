@@ -458,3 +458,10 @@ button.compact{padding:6px 10px}
   .lane{height:auto;min-height:120px;max-height:none}
   .lane-body{min-height:0;max-height:none;overflow:visible}
 }
+
+
+.runner-config{min-width:0;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:8px 10px;border:1px solid #343942;border-radius:7px;background:#202228}
+.runner-config label{display:grid;gap:5px;min-width:130px;font-size:11px;font-weight:600;color:#c5cbd5}
+.runner-config select{min-height:32px;font-size:12px}
+.runner-config .runner-hint{flex:1 1 160px;padding-bottom:5px}
+@media(max-width:420px){.runner-config{gap:7px}.runner-config label{width:100%}.runner-config .runner-hint{padding:0}}
