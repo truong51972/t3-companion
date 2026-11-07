@@ -23,6 +23,70 @@ export async function pageOperation(
   timeoutMs: number,
 ): Promise<PageResult> {
   const fail = (error: string): PageResult => ({ ok: false, error });
+  // A page-world socket is kept per T3 tab. Credentials/tickets never leave MAIN.
+  // A single socket can serve concurrent requests; the panel never stores credentials.
+  type Pending = { method: string; timer: ReturnType<typeof setTimeout>; resolve: (value: PageResult) => void };
+  type Connection = {
+    environmentId: string; socket: WebSocket | null; connecting: Promise<WebSocket> | null;
+    pending: Map<string, Pending>; idleTimer: ReturnType<typeof setTimeout> | null;
+    disposed: boolean; dispose: (reason: string) => void;
+  };
+  const bridgeKey = Symbol.for('t3-companion.page-rpc.v1');
+  const page = globalThis as unknown as Record<symbol, Connection | undefined>;
+  const settle = (connection: Connection, id: string, value: PageResult) => {
+    const entry = connection.pending.get(id);
+    if (!entry) return;
+    connection.pending.delete(id);
+    clearTimeout(entry.timer);
+    entry.resolve(value);
+    if (!connection.pending.size && connection.socket?.readyState === WebSocket.OPEN) {
+      if (connection.idleTimer) clearTimeout(connection.idleTimer);
+      connection.idleTimer = setTimeout(() => connection.dispose('Idle connection closed'), 90000);
+    }
+  };
+  async function sendRpc(connection: Connection, tag: string, input: unknown, limit: number): Promise<PageResult> {
+    if (connection.disposed) return fail('T3 environment changed');
+    let socket: WebSocket;
+    try {
+      socket = connection.socket?.readyState === WebSocket.OPEN
+        ? connection.socket : await connection.connecting!;
+      if (connection.disposed || socket.readyState !== WebSocket.OPEN) return fail('T3 RPC connection closed');
+    } catch (error) { return fail('T3 RPC connect failed: ' + String(error)); }
+    if (connection.pending.size >= 32) return fail('Too many in-flight T3 RPC requests');
+    if (connection.idleTimer) { clearTimeout(connection.idleTimer); connection.idleTimer = null; }
+    const id = crypto.randomUUID();
+    return new Promise<PageResult>(resolve => {
+      const timer = setTimeout(() => settle(connection, id, fail('T3 RPC timed out')), limit);
+      connection.pending.set(id, { method: tag, timer, resolve });
+      try { socket.send(JSON.stringify({ _tag: 'Request', id, tag, payload: input, headers: [] })); }
+      catch { settle(connection, id, fail('T3 RPC send failed')); connection.dispose('T3 RPC socket failed'); }
+    });
+  }
+  const cached = page[bridgeKey];
+  if (operation === 'rpc' && method && preferredEnvironmentId &&
+    cached?.environmentId === preferredEnvironmentId && !cached.disposed &&
+    (cached.socket?.readyState === WebSocket.OPEN || cached.connecting)) {
+    return sendRpc(cached, method, payload, timeoutMs);
+  }
+  // Serialize cold-start authorization across environments; once connected,
+  // requests on the same environment multiplex without waiting for another RPC.
+  // Once the first connection exists, subsequent calls multiplex immediately.
+  const preparationKey = Symbol.for('t3-companion.rpc-preparing.v1');
+  type Preparation = { environmentId: string; done: Promise<void> };
+  const preparationPage = globalThis as unknown as Record<symbol, Preparation | undefined>;
+  const previous = preparationPage[preparationKey];
+  if (operation === 'rpc' && preferredEnvironmentId && previous) {
+    await previous.done;
+    return pageOperation(operation, preferredEnvironmentId, method, payload, timeoutMs);
+  }
+  let releasePreparation: (() => void) | undefined;
+  let preparation: Preparation | undefined;
+  if (operation === 'rpc' && preferredEnvironmentId) {
+    const done = new Promise<void>(resolve => { releasePreparation = resolve; });
+    preparation = { environmentId: preferredEnvironmentId, done };
+    preparationPage[preparationKey] = preparation;
+  }
+  try {
   const reserved = new Set(['settings', 'pair', 'guest', 'auth', 'welcome', 'usage', 'connect']);
   const pathname = location.pathname.split('/').filter(Boolean);
   let routeEnvironmentId: string | null = null;
@@ -120,6 +184,28 @@ export async function pageOperation(
   if (operation === 'describe') return { ok: true, value: known, environments, routeEnvironmentId };
 
   if (!method) return fail('RPC method is missing');
+  if (cached) cached.dispose('Environment or connection changed');
+  const connection: Connection = {
+    environmentId: selected, socket: null, connecting: null, pending: new Map(),
+    idleTimer: null, disposed: false, dispose: () => {},
+  };
+  connection.dispose = (reason: string) => {
+    if (connection.disposed) return;
+    connection.disposed = true;
+    if (connection.idleTimer) clearTimeout(connection.idleTimer);
+    if (page[bridgeKey] === connection) delete page[bridgeKey];
+    const socket = connection.socket;
+    connection.socket = null;
+    if (socket) {
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      try { socket.close(); } catch { /* already closed */ }
+    }
+    for (const id of connection.pending.keys()) settle(connection, id, fail(reason));
+  };
+  page[bridgeKey] = connection;
+  const establish = async (): Promise<WebSocket> => {
   let socketUrl: URL;
   try {
     if (direct?.environmentId === selected) {
@@ -136,36 +222,36 @@ export async function pageOperation(
         (target?._tag === 'BearerConnectionTarget' && profile?.authorization === 't3-connect');
       const useDpop = needsDpop && !!token?.endpoint && !!token.accessToken;
       if (needsDpop && !useDpop) {
-        return fail('No fresh T3 Connect credential was saved for this environment. Open it in T3 Web, confirm it connects, and retry.');
+        throw new Error('No fresh T3 Connect credential was saved for this environment. Open it in T3 Web, confirm it connects, and retry.');
       }
       if (!useDpop && (!profile || !credential || profile.authorization === 't3-connect')) {
-        return fail('T3 Web has no reusable authorization for this environment. Open the environment in T3 Web and retry.');
+        throw new Error('T3 Web has no reusable authorization for this environment. Open the environment in T3 Web and retry.');
       }
       const http = checkHttpOrigin(useDpop ? token!.endpoint!.httpBaseUrl! : profile!.httpBaseUrl!);
       const ws = checkWsOrigin(useDpop ? token!.endpoint!.wsBaseUrl! : profile!.wsBaseUrl!);
       if (http.hostname !== ws.hostname || http.port !== ws.port ||
         (http.protocol === 'https:' && ws.protocol !== 'wss:') ||
         (http.protocol === 'http:' && ws.protocol !== 'ws:')) {
-        return fail('T3 session endpoints disagree; refusing to forward authentication.');
+        throw new Error('T3 session endpoints disagree; refusing to forward authentication.');
       }
 
       const descriptorResponse = await fetch(new URL('/.well-known/t3/environment', http).href,
         { credentials: 'omit', redirect: 'error', cache: 'no-store' });
-      if (!descriptorResponse.ok) return fail('Remote T3 environment descriptor is unavailable.');
+      if (!descriptorResponse.ok) throw new Error('Remote T3 environment descriptor is unavailable.');
       const descriptor = await descriptorResponse.json() as { environmentId?: string };
-      if (descriptor.environmentId !== selected) return fail('Remote endpoint has a different environment ID.');
+      if (descriptor.environmentId !== selected) throw new Error('Remote endpoint has a different environment ID.');
 
       let proof: ((verb: 'GET' | 'POST', url: string, accessToken: string) => Promise<string>) | undefined;
       if (useDpop) {
         if (!token || !token.accessToken || !token.dpopThumbprint ||
           typeof token.expiresAtEpochMs !== 'number' || token.expiresAtEpochMs <= Date.now() + 5000) {
-          return fail('T3 Web session token expired. Open the remote environment in T3 and retry.');
+          throw new Error('T3 Web session token expired. Open the remote environment in T3 and retry.');
         }
         const record = await readStore('t3code:cloud-auth', 'keys', 'relay-dpop-proof-key') as
           { privateKey?: CryptoKey; publicJwk?: { crv?: string; kty?: string; x?: string; y?: string }; thumbprint?: string } | null;
         if (!record?.privateKey || !record.publicJwk || record.thumbprint !== token.dpopThumbprint ||
           record.publicJwk.kty !== 'EC' || record.publicJwk.crv !== 'P-256') {
-          return fail('T3 Web DPoP key is missing or no longer matches the active session.');
+          throw new Error('T3 Web DPoP key is missing or no longer matches the active session.');
         }
         const bytes = (value: Uint8Array): string => btoa(Array.from(value, n => String.fromCharCode(n)).join(''))
           .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -198,9 +284,9 @@ export async function pageOperation(
       };
       let ticketResponse = await authorizeTicket('/api/auth/websocket-ticket/rpc');
       if (ticketResponse.status === 404) ticketResponse = await authorizeTicket('/api/auth/websocket-ticket');
-      if (!ticketResponse.ok) return fail('T3 session denied WebSocket authorization (' + ticketResponse.status + ').');
+      if (!ticketResponse.ok) throw new Error('T3 session denied WebSocket authorization (' + ticketResponse.status + ').');
       const ticket = await ticketResponse.json() as { ticket?: string };
-      if (!ticket.ticket) return fail('T3 returned an invalid WebSocket ticket.');
+      if (!ticket.ticket) throw new Error('T3 returned an invalid WebSocket ticket.');
 
       socketUrl = new URL(ws.href);
       if (!socketUrl.pathname || socketUrl.pathname === '/') socketUrl.pathname = '/ws';
@@ -212,46 +298,65 @@ export async function pageOperation(
       // Ticket and DPoP proof remain in this page-context closure, never in extension messages.
     }
   } catch (error) {
-    return fail('T3 session RPC setup failed: ' + (error instanceof Error ? error.message : 'unknown error'));
+    throw new Error('T3 session RPC setup failed: ' + (error instanceof Error ? error.message : 'unknown error'));
   }
   socketUrl.searchParams.set('orchestrationProtocol', '2');
-  const requestId = crypto.randomUUID();
-  return new Promise<PageResult>(resolve => {
+  if (connection.disposed) throw new Error('T3 environment changed during connection');
+  return new Promise<WebSocket>((resolve, reject) => {
     const socket = new WebSocket(socketUrl);
-    let finished = false;
-    const timer = setTimeout(() => finish(fail('T3 RPC timed out')), timeoutMs);
-    function finish(value: PageResult) {
-      if (finished) return;
-      finished = true;
+    connection.socket = socket;
+    const timer = setTimeout(() => {
+      connection.dispose('T3 RPC connect timed out');
+      reject(new Error('T3 RPC connect timed out'));
+    }, 12000);
+    socket.onerror = () => {
       clearTimeout(timer);
-      try { socket.close(); } catch { /* closed */ }
-      resolve(value);
-    }
-    socket.onerror = () => finish(fail('T3 environment WebSocket failed (check session/remote availability).'));
-    socket.onclose = () => finish(fail('T3 environment WebSocket closed before responding.'));
-    socket.onopen = () => socket.send(JSON.stringify({ _tag: 'Request', id: requestId, tag: method, payload, headers: [] }));
+      connection.dispose('T3 environment WebSocket failed');
+      reject(new Error('T3 environment WebSocket failed'));
+    };
+    socket.onclose = () => {
+      clearTimeout(timer);
+      connection.dispose('T3 environment WebSocket closed');
+      reject(new Error('T3 environment WebSocket closed'));
+    };
+    socket.onopen = () => {
+      clearTimeout(timer);
+      if (connection.disposed) { socket.close(); reject(new Error('T3 environment changed')); return; }
+      resolve(socket);
+    };
     socket.onmessage = event => {
       try {
         const decoded = JSON.parse(String(event.data));
         for (const frame of (Array.isArray(decoded) ? decoded : [decoded])) {
-          if (frame.requestId !== requestId) continue;
+          const entry = connection.pending.get(frame.requestId);
+          if (!entry) continue;
           if (frame._tag === 'Chunk' && frame.values?.length) {
             const item = frame.values[0];
-            if (method === 'orchestration.subscribeShell' && item?.kind === 'snapshot') {
-              finish({ ok: true, value: item.snapshot }); return;
+            if (entry.method === 'orchestration.subscribeShell' && item?.kind === 'snapshot') {
+              settle(connection, frame.requestId, { ok: true, value: item.snapshot });
+            } else if (entry.method === 'terminal.observe') {
+              settle(connection, frame.requestId, { ok: true, value: item });
             }
-            if (method === 'terminal.observe') { finish({ ok: true, value: item }); return; }
-          }
-          if (frame._tag === 'Exit') {
-            finish(frame.exit?._tag === 'Success'
+          } else if (frame._tag === 'Exit') {
+            settle(connection, frame.requestId, frame.exit?._tag === 'Success'
               ? { ok: true, value: frame.exit.value }
               : fail(JSON.stringify(frame.exit?.cause || frame.exit || 'T3 RPC failed').slice(0, 900)));
-            return;
           }
         }
-      } catch { finish(fail('Invalid T3 RPC response')); }
+      } catch {
+        connection.dispose('Invalid T3 RPC response');
+      }
     };
   });
+  };
+  connection.connecting = establish();
+  void connection.connecting.catch(() => connection.dispose('T3 RPC connection failed'));
+  return sendRpc(connection, method, payload, timeoutMs);
+  } finally {
+    if (preparation && preparationPage[preparationKey] === preparation)
+      delete preparationPage[preparationKey];
+    releasePreparation?.();
+  }
 }
 
 async function executeInT3Tab<T>(

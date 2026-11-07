@@ -52,10 +52,12 @@ export async function detectTab(tab: chrome.tabs.Tab): Promise<boolean> {
 
 export async function isRecognizedTab(tab: chrome.tabs.Tab): Promise<boolean> {
   if (!tab.url || !isSafeOrigin(tab.url)) return false;
-  if (await detectTab(tab)) return true;
+  // A previously verified origin (or canonical T3 domain) needs no repeated DOM
+  // injection and manifest HTTP fetch on every tab update.
+  if (isT3Web(tab.url)) return true;
   const { verifiedOrigins = [] } = await chrome.storage.local.get('verifiedOrigins');
-  // Recognized origins remain available while the app is loading. This is not authentication.
-  return (verifiedOrigins as string[]).includes(new URL(tab.url).origin) || isT3Web(tab.url);
+  if ((verifiedOrigins as string[]).includes(new URL(tab.url).origin)) return true;
+  return detectTab(tab);
 }
 
 /** Resolve the T3 Web-selected environment, or an explicitly selected session environment. */
@@ -142,8 +144,11 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
       }
     }
     const deadline = Date.now() + timeoutMs;
+    let observations = 0;
     while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 750));
+      // Short first observation for fast local status commands; bound later polls.
+      const delay = observations++ === 0 ? 120 : Math.min(200 + observations * 100, 600);
+      await new Promise(resolve => setTimeout(resolve, delay));
       const event = await rpc<any>(tabId, environmentId, 'terminal.observe', { threadId: hostThreadId, terminalId: id }, 4000);
       const output = readableTerminalText(String(event?.snapshot?.history || event?.history || event?.data || ''));
       // Require a complete marker line. A command echoed by the PTY contains

@@ -5,12 +5,6 @@ import { checkLatestRelease, newerVersion, releasesPage, type LatestRelease } fr
 import '../shared/styles.css';
 import './popup.css';
 
-async function setPanelEnabled(tabId: number, enabled: boolean) {
-  const current = await chrome.sidePanel.getOptions({ tabId });
-  if (current.enabled === enabled && (!enabled || current.path === 'sidepanel.html')) return;
-  await chrome.sidePanel.setOptions({ tabId, ...(enabled ? { path: 'sidepanel.html' } : {}), enabled });
-}
-
 function Popup() {
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [detected, setDetected] = useState(false);
@@ -28,25 +22,19 @@ function Popup() {
         const recognized = await isRecognizedTab(t);
         if (!alive) return;
         setTab(t); setDetected(recognized);
-        if (t.id) {
-          await setPanelEnabled(t.id, recognized);
-          const state = await chrome.storage.session.get(`open:${t.id}`);
-          if (alive) setOpen(Boolean(state[`open:${t.id}`]));
-        }
+        const state = await chrome.storage.session.get(`open:window:${t.windowId}`);
+        if (alive) setOpen(Boolean(state[`open:window:${t.windowId}`]));
       } catch (e) { if (alive) setError(String(e)); }
       finally { if (alive) setChecking(false); }
     })();
     return () => { alive = false; };
   }, []);
   async function toggle() {
-    if (!detected || tab?.id === undefined) return;
+    if ((!detected && !open) || tab?.windowId === undefined) return;
     setError('');
     try {
-      if (open) await chrome.sidePanel.close({ tabId: tab.id });
-      else {
-        await setPanelEnabled(tab.id, true);
-        await chrome.sidePanel.open({ tabId: tab.id });
-      }
+      if (open) await chrome.sidePanel.close({ windowId: tab.windowId });
+      else await chrome.sidePanel.open({ windowId: tab.windowId });
       setOpen(!open);
     } catch (e) { setError(String(e)); }
   }
@@ -56,7 +44,6 @@ function Popup() {
     try {
       const recognized = await detectTab(tab);
       setDetected(recognized);
-      if (tab.id !== undefined) await setPanelEnabled(tab.id, recognized);
     } catch (e) { setError(String(e)); }
     finally { setChecking(false); }
   }
@@ -72,10 +59,10 @@ function Popup() {
     <div className="panel stack">
       <div className="row"><span>T3 Web</span><span className={`tag ${detected ? 'ok':'warn'}`}>{checking ? 'Checking…' : detected ? 'Detected' : 'Not detected'}</span></div>
       <p className="muted">{detected ? 'Dashboard available on this tab (including custom Cloudflare domains).' : 'Open T3 Code and verify the app page to enable the dashboard.'}</p>
-      <div className="buttons"><button className="primary" disabled={!detected || checking} onClick={() => void toggle()}>{open ? 'Close Side Panel' : 'Open Side Panel'}</button><button disabled={checking} onClick={() => void recheck()}>Recheck</button></div>
+      <div className="buttons"><button className="primary" disabled={(!detected && !open) || checking} onClick={() => void toggle()}>{open ? 'Close Side Panel' : 'Open Side Panel'}</button><button disabled={checking} onClick={() => void recheck()}>Recheck</button></div>
     </div>
     <div className="panel stack"><div className="row"><h2>Runner</h2><span className="tag">Via T3 RPC</span></div>
-      <p className="muted">Open the Runner tab in the Side Panel to inspect and manage the Runner installed on the T3 environment.</p></div>
+      <p className="muted">Open Overview in the Side Panel to inspect and manage the Runner installed on the T3 environment.</p></div>
     <div className="panel stack"><div className="row"><h2>Updates</h2><span className="caption">{releaseStatus}</span></div>
       <div className="buttons"><button onClick={() => void check()}>Check Updates</button><button onClick={() => void chrome.tabs.create({ url: release?.url || releasesPage })}>{release ? 'Download Release' : 'View Releases'}</button></div></div>
     {error && <p role="alert" className="notice">{error}</p>}

@@ -1,34 +1,18 @@
-import { isT3Web } from '../shared/t3-site';
-async function applyTab(tabId: number, raw?: string) {
-  if (!raw || !Number.isInteger(tabId) || tabId < 0) return;
-  try {
-    const { verifiedOrigins = [] } = await chrome.storage.local.get('verifiedOrigins');
-    const origin = new URL(raw).origin;
-    const enabled = isT3Web(raw) || (verifiedOrigins as string[]).includes(origin);
-    // Avoid reconfiguring an unchanged tab-specific panel on every tab activation
-    // or page load. Edge may recreate its sidebar view when options are reapplied.
-    const current = await chrome.sidePanel.getOptions({ tabId });
-    if (current.enabled === enabled && (!enabled || current.path === 'sidepanel.html')) return;
-    await chrome.sidePanel.setOptions({ tabId, ...(enabled ? { path: 'sidepanel.html' } : {}), enabled });
-  } catch { /* closed tab or forbidden URL */ }
-}
+/**
+ * Use one window-scoped panel so Edge doesn't recreate the React app when the
+ * active tab changes. Connection discovery remains restricted to verified T3 tabs.
+ */
 async function initialize() {
-  await chrome.sidePanel.setOptions({ enabled: false });
-  for (const tab of await chrome.tabs.query({})) if (tab.id !== undefined) await applyTab(tab.id, tab.url);
+  const options = await chrome.sidePanel.getOptions({});
+  if (!options.enabled || options.path !== 'sidepanel.html') {
+    await chrome.sidePanel.setOptions({ enabled: true, path: 'sidepanel.html' });
+  }
 }
 chrome.runtime.onInstalled.addListener(() => { void initialize(); });
 chrome.runtime.onStartup.addListener(() => { void initialize(); });
-chrome.tabs.onUpdated.addListener((id, changes, tab) => {
-  if (changes.url || changes.status === 'complete') void applyTab(id, tab.url);
-});
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (tab) await applyTab(tabId, tab.url);
-});
-chrome.tabs.onRemoved.addListener(id => { void chrome.storage.session.remove(`open:${id}`); });
 chrome.sidePanel.onOpened.addListener(info => {
-  if (info.tabId !== undefined) void chrome.storage.session.set({ [`open:${info.tabId}`]: true });
+  void chrome.storage.session.set({ [`open:window:${info.windowId}`]: true });
 });
 chrome.sidePanel.onClosed.addListener(info => {
-  if (info.tabId !== undefined) void chrome.storage.session.set({ [`open:${info.tabId}`]: false });
+  void chrome.storage.session.set({ [`open:window:${info.windowId}`]: false });
 });
