@@ -120,3 +120,21 @@ test('validateTasks and validateRuntime reject invalid payloads', () => {
   assert.doesNotThrow(() => validateTasks({ version: 1, tasks: [] }));
   assert.doesNotThrow(() => validateRuntime({ version: 1, requests: {} }));
 });
+
+test('task execution settings validate and remain separate from queued snapshots', () => {
+  const configured = {
+    version: 1, tasks: [{
+      id: 'task', title: 'Fix', prompt: 'Fix it', status: 'todo',
+      execution: { workspace: 'worktree', baseRef: 'origin/main',
+        modelSelection: { instanceId: 'codex', model: 'gpt-6.1-sol' } },
+      executionRequests: [{ requestId: 'run-1', execution: {
+        workspace: 'root', notBefore: '2026-12-01T02:00:00.000Z' } }],
+    }],
+  };
+  assert.doesNotThrow(() => validateTasks(configured));
+  assert.throws(() => validateTasks({ ...configured,
+    tasks: [{ ...configured.tasks[0], execution: { workspace: 'unsupported' } }] }));
+  assert.throws(() => validateTasks({ ...configured,
+    tasks: [{ ...configured.tasks[0], executionRequests: [{ requestId: 'run-2',
+      execution: { workspace: 'worktree', modelSelection: { instanceId: '', model: 'gpt' } } }] }] }));
+});
