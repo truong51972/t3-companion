@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { projectThreadInspection, type ThreadInspection } from './workflow.ts';
-import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime } from './storage.ts';
+import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime, readRunnerSettings } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -115,12 +115,14 @@ export const executeT3: Execute = async (project, task, request) => {
   });
 };
 
-export async function runRunner({ home = defaultHome(), once = false, intervalMs = 10000, concurrency = 3, execute = executeT3, inspect }:
+export async function runRunner({ home = defaultHome(), once = false, intervalMs, concurrency, execute = executeT3, inspect }:
   { home?: string; once?: boolean; intervalMs?: number; concurrency?: number; execute?: Execute; inspect?: InspectThread } = {}) {
   // Synthetic executors used by unit tests do not contact a real T3 server.
   const inspectThread = inspect ?? (execute === executeT3 ? inspectT3Thread : null);
-  if (!Number.isInteger(intervalMs) || intervalMs < 10) throw new Error('Polling interval must be >= 10ms');
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3) throw new Error('Concurrency must be 1..3');
+  if (intervalMs !== undefined && (!Number.isInteger(intervalMs) || intervalMs < 10))
+    throw new Error('Polling interval must be >= 10ms');
+  if (concurrency !== undefined && (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3))
+    throw new Error('Concurrency must be 1..3');
   const owner = await acquire(home);
   const active = new Map<string, Promise<void>>();
   // Serialize read-modify-write of runtime.json per project. Atomic rename alone
@@ -196,12 +198,17 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
     }
     while (!stopping) {
       if (await fs.stat(stopFile(home)).then(() => true, () => false)) break;
+      // Read durable config on every dispatch cycle; decreases never kill
+      // running workers. Explicit CLI overrides remain supported.
+      const settings = await readRunnerSettings(home);
+      const poolLimit = concurrency ?? settings.maxConcurrent;
+      const cycleMs = intervalMs ?? settings.scanIntervalMs;
       for (const project of await listProjects(home)) {
-        if (stopping || active.size >= concurrency) break;
+        if (stopping || active.size >= poolLimit) break;
         try {
           const tasks = await readTasks(project); const runtime = await readRuntime(project);
           for (const task of tasks.tasks) for (const request of task.executionRequests || []) {
-            if (active.size >= concurrency || stopping) break;
+            if (active.size >= poolLimit || stopping) break;
             if (await fs.stat(stopFile(home)).then(() => true, () => false)) { stopping = true; break; }
             if (runtime.requests[request.requestId]) continue;
             if (request.notBefore && (Number.isNaN(Date.parse(request.notBefore)) || Date.parse(request.notBefore) > Date.now())) continue;
@@ -251,7 +258,7 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
         try { await reconcile(project); } catch (error) { console.error(`Status scan failed for ${project}: ${String(error)}`); }
       }
       if (once) break;
-      await sleep(intervalMs);
+      await sleep(cycleMs);
     }
     await Promise.allSettled(active.values());
   } finally {
