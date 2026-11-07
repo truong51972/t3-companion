@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
 
@@ -53,10 +53,34 @@ export async function startDetached(home = defaultHome()) {
   } finally { await file.close(); }
 }
 
+/** Resolve a base branch without guessing 'main' for repositories using another default. */
+function gitOutput(project: string, args: string[]): string | null {
+  const result = spawnSync('git', ['-C', project, ...args], { encoding: 'utf8', windowsHide: true, timeout: 4000 });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+export function workspaceBaseFor(project: string, request: ExecutionRequest): string | null {
+  if (request.workspace === 'root') return null;
+  // An explicit worktree ref from the v1 contract always opts into isolation.
+  const explicit = request.worktree?.trim();
+  if (!request.workspace && !explicit) return null; // legacy requests stay on the shared checkout
+  const isRepo = gitOutput(project, ['rev-parse', '--is-inside-work-tree']) === 'true';
+  if (!isRepo) {
+    if (request.workspace === 'auto' && !explicit) return null; // non-Git projects use root
+    throw new Error('Worktree execution requires a Git repository');
+  }
+  const branch = explicit ||
+    gitOutput(project, ['branch', '--show-current']) ||
+    gitOutput(project, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])?.replace(/^origin\//, '');
+  if (!branch) throw new Error('Cannot resolve a base branch; select one in Advanced options');
+  return branch;
+}
+
 export type Execute = (project: string, task: Task, request: ExecutionRequest) => Promise<{ status: 'completed' | 'blocked' | 'failed'; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }>;
 export const executeT3: Execute = async (project, task, request) => {
   const args = ['thread', 'start', project, '-', '--wait', '--json'];
-  if (request.worktree) args.push('--worktree', request.worktree);
+  const base = workspaceBaseFor(project, request);
+  if (base) args.push('--worktree', base);
   return new Promise((resolve, reject) => {
     const proc = spawn(process.env.T3_COMPANION_T3_BIN || 't3', args, { cwd: project, stdio: ['pipe', 'pipe', 'pipe'] });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
@@ -127,7 +151,11 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             if (await fs.stat(stopFile(home)).then(() => true, () => false)) { stopping = true; break; }
             if (runtime.requests[request.requestId]) continue;
             if (request.notBefore && (Number.isNaN(Date.parse(request.notBefore)) || Date.parse(request.notBefore) > Date.now())) continue;
-            if (!request.worktree && nonWorktreeProjects.has(project)) continue;
+            let sharedCheckout = !request.worktree && request.workspace !== 'worktree';
+            if (request.workspace === 'auto') {
+              sharedCheckout = gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true';
+            }
+            if (sharedCheckout && nonWorktreeProjects.has(project)) continue;
             const id = `${project}:${request.requestId}`;
             const claimed = await updateRuntime(project, current => {
               if (current.requests[request.requestId]) return false;
@@ -136,7 +164,7 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             if (!claimed) continue;
             runtime.requests[request.requestId] = { taskId: task.id, status: 'dispatching', startedAt: new Date().toISOString() };
             // The durable intent has been written before any T3 CLI side effect.
-            if (!request.worktree) nonWorktreeProjects.add(project);
+            if (sharedCheckout) nonWorktreeProjects.add(project);
             const operation = (async () => {
               try {
                 const result = await execute(project, task, request);
@@ -151,7 +179,7 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
                   updated.requests[request.requestId] = { ...updated.requests[request.requestId], status: 'failed', error: String(error), finishedAt: new Date().toISOString() };
                 });
               } finally {
-                active.delete(id); if (!request.worktree) nonWorktreeProjects.delete(project);
+                active.delete(id); if (sharedCheckout) nonWorktreeProjects.delete(project);
               }
             })(); active.set(id, operation);
           }
