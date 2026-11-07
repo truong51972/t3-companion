@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { handleDialogBackdrop } from '../Common';
 import {
   BOARD_COLUMNS, blankTask, type Task, type TaskStatus,
-  type TaskModelSelection, type WorkspaceMode,
+  type TaskModelSelection, type TaskExecutionSettings, type WorkspaceMode,
 } from '../../../shared/domain-types';
 
 function localDateTime(iso?: string) {
@@ -44,7 +44,7 @@ export function TaskEditorModal({
     else if (!open && dialog.open) dialog.close();
   }, [open]);
 
-  const execution = draft.execution || { workspace: 'auto' as WorkspaceMode };
+  const execution: TaskExecutionSettings = draft.execution || { workspace: 'auto' };
   const selectedModel = execution.modelSelection
     ? execution.modelSelection.instanceId + '\u0000' + execution.modelSelection.model
     : '';
@@ -62,7 +62,9 @@ export function TaskEditorModal({
       execution: { workspace: 'auto', ...previous.execution, ...patch },
     }));
   }
-  const scheduledISO = schedule ? new Date(schedule).toISOString() : undefined;
+  const scheduledDate = schedule ? new Date(schedule) : null;
+  const scheduleValid = !scheduledDate || !Number.isNaN(scheduledDate.valueOf());
+  const scheduledISO = scheduledDate && scheduleValid ? scheduledDate.toISOString() : undefined;
   const selectedModelValid = !execution.modelSelection ||
     Boolean(execution.modelSelection.instanceId.trim() && execution.modelSelection.model.trim());
   const workspaceValid = execution.workspace === 'root' ||
@@ -201,7 +203,7 @@ export function TaskEditorModal({
         <button onClick={onClose}>Cancel</button>
         <button className="primary"
           disabled={busy || !draft.title.trim() || !draft.prompt.trim() ||
-            !selectedModelValid || !workspaceValid || Boolean(schedule && Number.isNaN(Date.parse(schedule)))}
+            !selectedModelValid || !workspaceValid || !scheduleValid}
           onClick={() => void onSave({
             ...draft, execution: {
               ...execution,
