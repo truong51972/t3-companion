@@ -46,7 +46,7 @@ export function TaskEditorModal({
 
   const execution: TaskExecutionSettings = draft.execution || { workspace: 'auto' };
   const selectedModel = execution.modelSelection
-    ? execution.modelSelection.instanceId + '\u0000' + execution.modelSelection.model
+    ? JSON.stringify([execution.modelSelection.instanceId, execution.modelSelection.model])
     : '';
   const modelChoices = useMemo(() => {
     const values = [...availableModels];
@@ -140,13 +140,13 @@ export function TaskEditorModal({
               } else {
                 setCustomModel(false);
                 const model = modelChoices.find(item =>
-                  item.instanceId + '\u0000' + item.model === e.target.value);
+                  JSON.stringify([item.instanceId, item.model]) === e.target.value);
                 setExecution({ modelSelection: model ? { ...model } : undefined });
               }
             }}>
             <option value="">Use T3 project default</option>
             {modelChoices.map(item => (
-              <option key={item.instanceId + ':' + item.model} value={item.instanceId + '\u0000' + item.model}>
+              <option key={item.instanceId + ':' + item.model} value={JSON.stringify([item.instanceId, item.model])}>
                 {item.model} · {item.instanceId}
               </option>
             ))}
