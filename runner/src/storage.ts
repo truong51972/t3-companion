@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
-export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'awaiting_merge' | 'done';
 export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed' | 'needs_reconciliation';
 export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: 'auto' | 'root' | 'worktree' }
 export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; executionRequests?: ExecutionRequest[] }
@@ -60,7 +60,7 @@ function validTaskDocument(data: any): data is TaskDocument {
   const ids = new Set<string>();
   const requestIds = new Set<string>();
   return data?.version === 1 && Array.isArray(data.tasks) && data.tasks.every((task: any) => {
-    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','done'].includes(task.status)) return false;
+    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','awaiting_merge','done'].includes(task.status)) return false;
     ids.add(task.id);
     return task.executionRequests === undefined || (Array.isArray(task.executionRequests) && task.executionRequests.every((req: any) => {
       if (!req || typeof req.requestId !== 'string' || !req.requestId || requestIds.has(req.requestId)) return false;
