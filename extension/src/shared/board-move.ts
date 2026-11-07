@@ -8,13 +8,14 @@ export type BoardMoveTask = { id: string; status: string; statusOverride?: boole
  */
 export function moveBoardItem<T extends BoardMoveTask>(
   tasks: readonly T[], taskId: string, nextStatus: T['status'], beforeTaskId?: string,
+  resolveLane: (task: T) => string = task => task.status,
 ): T[] {
   const source = tasks.find(task => task.id === taskId);
   if (!source) return [...tasks];
-  if (beforeTaskId === taskId && source.status === nextStatus && source.statusOverride) return [...tasks];
+  if (beforeTaskId === taskId && resolveLane(source) === nextStatus) return [...tasks];
 
   const remaining = tasks.filter(task => task.id !== taskId);
-  const inTargetLane = remaining.filter(task => task.status === nextStatus);
+  const inTargetLane = remaining.filter(task => resolveLane(task) === nextStatus);
   const targetPeer = beforeTaskId && inTargetLane.find(task => task.id === beforeTaskId);
   // Keep unaffected lanes in their original order. If there is a peer, insert
   // before it; otherwise append after the last target-lane task.
