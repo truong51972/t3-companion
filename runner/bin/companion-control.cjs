@@ -21,6 +21,7 @@ const files = [
   'runner/src/t3-cli.ts',
   'runner/src/lock.ts',
   'runner/src/reconciler.ts',
+  'runner/src/adapters.ts',
 ];
 // Release channel: resolve main to one immutable SHA before fetching all files.
 // The original four-file Runner is still a valid legacy install. New modules

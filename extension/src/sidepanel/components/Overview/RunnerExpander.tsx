@@ -127,6 +127,9 @@ export function RunnerExpander({
               <div><span>Execution</span><strong>{runner.running ? 'Active' : 'Stopped'}{runner.pid && runner.running ? ' · PID ' + runner.pid : ''}</strong></div>
               <div><span>Version</span><strong>{runner.version ? runner.version.slice(0, 10) : 'Unversioned'}</strong></div>
               <div><span>Scheduler</span><strong>{runner.scanIntervalMs ? Math.round(runner.scanIntervalMs / 1000) + 's scan' : 'Unavailable'} · {runner.maxConcurrent} workers</strong></div>
+              <div><span>Registered projects</span><strong>{runner.registeredProjects ?? 'Unknown'}</strong></div>
+              <div><span>Last scan</span><strong>{runner.lastScanAt ? new Date(runner.lastScanAt).toLocaleTimeString() : 'Not observed'}</strong></div>
+              <div><span>Active tasks / scan errors</span><strong>{runner.activeExecutions ?? '—'} / {runner.scanErrors ?? '—'}</strong></div>
               <div><span>Last verified</span><strong>{runnerCacheAt ? new Date(runnerCacheAt).toLocaleTimeString() + ' (cached)' : 'Current check'}</strong></div>
             </div>
           )}

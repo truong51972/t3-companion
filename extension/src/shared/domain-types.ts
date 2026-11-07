@@ -182,6 +182,10 @@ export interface ParsedRunnerState {
   cliAvailable: boolean;
   cliCommand: string | null;
   requiresCli: boolean;
+  registeredProjects: number | null;
+  lastScanAt: string | null;
+  activeExecutions: number | null;
+  scanErrors: number | null;
   label: 'Needs session' | 'Error' | 'Setup required' | 'Starting' | 'Not installed' | 'CLI unavailable' | 'Stopping' | 'Running' | 'Stopped' | 'Checking';
 }
 
@@ -224,6 +228,14 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
   const rawConcurrent = settings?.maxConcurrent ?? parsed?.maxConcurrent;
   const maxConcurrent = typeof rawConcurrent === 'number' && Number.isInteger(rawConcurrent) &&
     rawConcurrent >= 1 && rawConcurrent <= 3 ? rawConcurrent : 3;
+  const rawProjects = parsed?.registeredProjects;
+  const registeredProjects = typeof rawProjects === 'number' && Number.isSafeInteger(rawProjects)
+    ? rawProjects : null;
+  const health = parsed?.health && typeof parsed.health === 'object' &&
+    !Array.isArray(parsed.health) ? parsed.health as Record<string, unknown> : null;
+  const lastScanAt = typeof health?.lastScanAt === 'string' ? health.lastScanAt : null;
+  const activeExecutions = typeof health?.activeExecutions === 'number' ? health.activeExecutions : null;
+  const scanErrors = typeof health?.scanErrors === 'number' ? health.scanErrors : null;
 
   let label: ParsedRunnerState['label'] = 'Checking';
   if (!hostAvailable) {
@@ -264,6 +276,10 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
     cliAvailable,
     cliCommand,
     requiresCli,
+    registeredProjects,
+    lastScanAt,
+    activeExecutions,
+    scanErrors,
     label,
   };
 }

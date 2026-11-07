@@ -4,7 +4,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { projectThreadInspection, type ThreadInspection } from './workflow.ts';
 import { requireT3Cli } from './t3-cli.ts';
-import { defaultHome, listProjects, readTasks, readRuntime, saveRuntime, readRunnerSettings } from './storage.ts';
+import { defaultHome, listProjects, readTasks, readRuntime, saveRuntime, readRunnerSettings, atomicWrite } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
 import { acquire, release, status, requestStop, stopFile } from './lock.ts';
 import { reconcileProject, type InspectThread } from './reconciler.ts';
@@ -154,7 +154,9 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
       const settings = await readRunnerSettings(home);
       const poolLimit = concurrency ?? settings.maxConcurrent;
       const cycleMs = intervalMs ?? settings.scanIntervalMs;
-      for (const project of await listProjects(home)) {
+      const projects = await listProjects(home);
+      let scanErrors = 0;
+      for (const project of projects) {
         if (stopping) break; // PR/input reconciliation continues while the pool is full
         try {
           const tasks = await readTasks(project); const runtime = await readRuntime(project);
@@ -206,12 +208,17 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
               }
             })(); active.set(id, operation);
           }
-        } catch (error) { console.error(`Skipping ${project}: ${String(error)}`); }
+        } catch (error) { scanErrors++; console.error(`Skipping ${project}: ${String(error)}`); }
         // Scan even when there are no new queue entries.
         try {
           if (inspectThread) await reconcileProject(project, inspectThread, updateRuntime);
-        } catch (error) { console.error(`Status scan failed for ${project}: ${String(error)}`); }
+        } catch (error) { scanErrors++; console.error(`Status scan failed for ${project}: ${String(error)}`); }
       }
+      // Heartbeat belongs to this runner PID; a stale file never proves liveness.
+      await atomicWrite(path.join(home, 'health.json'), {
+        pid: process.pid, lastScanAt: new Date().toISOString(),
+        scannedProjects: projects.length, activeExecutions: active.size, scanErrors,
+      }).catch(error => console.error('Runner heartbeat: ' + String(error)));
       if (once) break;
       await sleep(cycleMs);
     }

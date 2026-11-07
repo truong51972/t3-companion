@@ -62,3 +62,11 @@ Runner settings are durable at `~/.t3/runner/config.json` (or the configured run
 The global worker limit is 1–3; the scan interval is validated between 1000–60000 ms. Both are reloaded each dispatch loop, so changing the limit does not interrupt active workers. The Overview controls Max Concurrent through the existing terminal bridge; it is **not** a browser-only preference. Runner separately re-inspects at most four relevant threads per project pass, with a 30-second per-thread throttle; failures do not infer a PR merge or completion.
 
 The `runtime.json` entries may include `workflowStage` (`in_progress | human_review | awaiting_merge | done`), `pendingRequestCount`, `changeRequests` (`url` and `state`) and `lastInspectedAt`. Merge detection only trusts T3's linked PR/MR metadata; it never scans assistant replies, project branches or arbitrary PR mentions. Thread state may be temporarily stale while T3's PR metadata is being refreshed. No agent is instructed to update its own task status.
+
+## Runner health — `~/.t3/runner/health.json`
+
+The Runner writes one atomic heartbeat after each scheduler pass:
+`{ "pid": 1234, "lastScanAt": "ISO", "scannedProjects": 2, "activeExecutions": 1, "scanErrors": 0 }`.
+The CLI ignores a heartbeat whose PID does not match the live Runner lock.
+`t3-runner status` also reports built-in adapter capabilities and the registered project count.
+This file is diagnostics-only and must never be treated as authority for task completion.

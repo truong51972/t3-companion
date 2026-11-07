@@ -116,7 +116,7 @@ test('installed Runner starts its real CLI status from the complete downloaded m
   assert.equal(installed.updated, true);
   assert.equal(installed.upgradeRequired, false);
   assert.equal(installed.version, sha);
-  for (const name of ['lock.ts', 'reconciler.ts', 'workflow.ts', 't3-cli.ts'])
+  for (const name of ['lock.ts', 'reconciler.ts', 'workflow.ts', 't3-cli.ts', 'adapters.ts'])
     assert.ok(existsSync(path.join(home, '.t3', 'companion', 'runner', 'src', name)),
       'Missing installed Runner dependency: ' + name);
 

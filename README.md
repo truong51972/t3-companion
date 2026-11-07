@@ -103,3 +103,21 @@ The installed `SKILL.md` teaches coding agents to use its bundled `scripts/tasks
 The Side Panel now avoids repeated Shell RPCs when the selected tab/environment is unchanged, coalesces navigation-triggered refreshes, and updates Board state after successful task writes instead of immediately re-reading both JSON files. A window-scoped panel retains UI state while changing tabs. Its page-world adapter multiplexes requests over one reusable WebSocket per selected environment, closes failed connections, and idles out unused sockets after 90 seconds; no ticket or credential is copied into extension storage. Runner status remains a one-shot terminal operation, deferred until the initial UI has rendered.
 
 To profile real browser behavior, open DevTools for **the Side Panel** (Edge/Chrome extensions page → inspect views). Record time from panel open to Board interaction and test switching tabs, projects, editing a task, opening Overview, and refreshing Runner. Also inspect the T3 Web tab's Network → WS to verify repeated file RPCs reuse a single connection; one new WebSocket after idle timeout or environment switch is expected. Compare localhost and remote T3 with the same task data, and check that failures/timeouts recover after the next action. Automated tests cover socket sharing and connection isolation, but CI does not measure interactive browser latency.
+
+### Built-in Runner adapters and health
+
+Runner includes a read-only Git adapter (no shell evaluation) for local refs and worktrees,
+the T3 CLI executor, workflow reconciliation and the scheduler. These are bundled by default
+whenever Runner is installed or upgraded; Agent Skill is optional.
+
+- `t3-runner inspect /absolute/project/path` prints a JSON snapshot of Git refs and worktrees
+  from the execution host. This does not create, switch or remove worktrees.
+- `t3-runner status` reports capability metadata, registered project count and the last
+  successful scan heartbeat. Heartbeat data is tagged with the owning PID and is ignored
+  when stale. The Side Panel keeps Runner status checks explicit rather than polling PTY.
+- Native T3 `vcs.listRefs` is used by the Task Editor for interactive branch discovery;
+  `server.getConfig` is used only when the user chooses More → Explore models. These
+  read-only calls stay inside the selected T3 Web environment's authenticated session.
+- Existing worktrees can be explored but cannot be selected for Runner dispatch until
+  the standalone T3 CLI exposes the equivalent native `existing_worktree` launch strategy.
+  Runner never silently substitutes a different checkout or copies browser credentials.

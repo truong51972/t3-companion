@@ -3,6 +3,9 @@ import { promises as fs } from 'node:fs';
 import { createTask, defaultHome, listProjects, registerProject, unregisterProject, readRunnerSettings, saveRunnerSettings } from './storage.ts';
 import { runRunner, startDetached, requestStop, status } from './runner.ts';
 import { findT3Cli } from './t3-cli.ts';
+import { RUNNER_CAPABILITIES, inspectGitProject } from './adapters.ts';
+import { readJson } from './storage.ts';
+import path from 'node:path';
 
 const [, , command, ...args] = process.argv;
 const usage = `t3-runner <command>
@@ -10,6 +13,7 @@ const usage = `t3-runner <command>
   task add <project> --title <text> --prompt <text> [--worktree main]
   run [--once] [--interval-ms 10000] [--concurrency 3]
   start | stop | status
+  inspect <project-path>  # read-only Git/worktree discovery
   config get | config set <max-concurrent 1..3>
 Environment: T3_COMPANION_HOME, T3CODE_HOME, T3_COMPANION_T3_BIN`;
 const opt = (name: string) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1]; };
@@ -29,9 +33,17 @@ try {
     const previous = await readRunnerSettings();
     result = await saveRunnerSettings({ ...previous, maxConcurrent: Number(args[1]) });
   }
+  else if (command === 'inspect' && args[0]) result = await inspectGitProject(args[0]);
   else if (command === 'start') result = { pid: await startDetached() };
   else if (command === 'stop') result = { requested: await requestStop() };
-  else if (command === 'status') result = { ...await status(), home: defaultHome(), settings: await readRunnerSettings(), cli: await findT3Cli() };
+  else if (command === 'status') {
+    const runner = await status();
+    const home = defaultHome();
+    const health = await readJson(path.join(home, 'health.json'), null).catch(() => null);
+    result = { ...runner, home, settings: await readRunnerSettings(), cli: await findT3Cli(),
+      capabilities: RUNNER_CAPABILITIES, registeredProjects: (await listProjects(home)).length,
+      health: runner.running && health?.pid === runner.pid ? health : null };
+  }
   else { console.log(usage); process.exitCode = 2; }
   if (result !== undefined) console.log(JSON.stringify(result, null, 2));
 } catch (e: any) { console.error(e.message); process.exitCode = 1; }
