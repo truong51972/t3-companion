@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { projectThreadInspection, type ThreadInspection } from './workflow.ts';
+import { requireT3Cli } from './t3-cli.ts';
 import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime, readRunnerSettings } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
 
@@ -13,7 +14,7 @@ export type InspectThread = (project: string, threadId: string) => Promise<Threa
 /** Read T3's server-owned thread projection, never scrape visible UI or agent text. */
 export const inspectT3Thread: InspectThread = async (project, threadId) => {
   try {
-    const { stdout } = await inspectExec(process.env.T3_COMPANION_T3_BIN || 't3',
+    const { stdout } = await inspectExec(await requireT3Cli(),
       ['thread', 'show', threadId, '--messages', '1', '--json'],
       { cwd: project, encoding: 'utf8', timeout: 9000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
     return projectThreadInspection(JSON.parse(stdout));
@@ -58,6 +59,9 @@ export async function requestStop(home = defaultHome()) {
 }
 export async function startDetached(home = defaultHome()) {
   if ((await status(home)).running) throw new Error('Runner already running');
+  // Validate *before* announcing a running worker pool. A logged-in T3 Web
+  // session does not guarantee the CLI is available to a detached process.
+  await requireT3Cli();
   await fs.mkdir(home, { recursive: true });
   const file = await fs.open(path.join(home, 'runner.log'), 'a', 0o600);
   try {
@@ -93,11 +97,12 @@ export function workspaceBaseFor(project: string, request: ExecutionRequest): st
 
 export type Execute = (project: string, task: Task, request: ExecutionRequest) => Promise<{ status: 'completed' | 'blocked' | 'failed'; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }>;
 export const executeT3: Execute = async (project, task, request) => {
+  const cli = await requireT3Cli();
   const args = ['thread', 'start', project, '-', '--wait', '--json'];
   const base = workspaceBaseFor(project, request);
   if (base) args.push('--worktree', base);
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.env.T3_COMPANION_T3_BIN || 't3', args, { cwd: project, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(cli, args, { cwd: project, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     proc.stdout.on('data', x => stdout.push(x)); proc.stderr.on('data', x => stderr.push(x));
     proc.on('error', reject); proc.stdin.on('error', () => {});
@@ -123,6 +128,9 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
     throw new Error('Polling interval must be >= 10ms');
   if (concurrency !== undefined && (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3))
     throw new Error('Concurrency must be 1..3');
+  // Refuse to claim queued requests if the actual T3 CLI cannot be located.
+  // Otherwise ENOENT would incorrectly mark untouched work as failed.
+  if (execute === executeT3) await requireT3Cli();
   const owner = await acquire(home);
   const active = new Map<string, Promise<void>>();
   // Serialize read-modify-write of runtime.json per project. Atomic rename alone
