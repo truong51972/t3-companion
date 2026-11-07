@@ -70,3 +70,11 @@ The Runner writes one atomic heartbeat after each scheduler pass:
 The CLI ignores a heartbeat whose PID does not match the live Runner lock.
 `t3-runner status` also reports built-in adapter capabilities and the registered project count.
 This file is diagnostics-only and must never be treated as authority for task completion.
+
+## Git checkout and compatibility
+
+The install at `~/.t3/t3-companion` is Git-managed, with source code only.
+It must not contain Runner's durable state. Updates use `git pull --ff-only`,
+with Runner drain/restart coordinated by the extension. State is retained in
+`~/.t3/runner`; legacy source at `~/.t3/companion/runner` is left intact
+after migration for safety.

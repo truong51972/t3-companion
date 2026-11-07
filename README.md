@@ -126,3 +126,27 @@ When Runner is installed and a T3 thread is available, **Task Editor → Explore
 can call the built-in `inspect` adapter on the selected execution host. Without Runner,
 the panel falls back to worktree paths attached to Git refs returned by T3. Both paths
 are read-only; neither will checkout or delete a branch.
+
+## Git-managed Runner installation
+
+The standalone Runner code now lives in `~/.t3/t3-companion`.
+Installation and updating use regular Git operations rather than downloading
+individual JavaScript files.
+
+```sh
+git clone https://github.com/truong51972/t3-companion.git ~/.t3/t3-companion
+git -C ~/.t3/t3-companion pull --ff-only
+```
+
+**Overview → Install & Start** clones the repository then starts the Runner.
+**Overview → Update Runner** checks for local changes, gracefully stops and
+drains any active workers, runs `git pull --ff-only`, then restarts the Runner
+if it was previously running. No `git reset --hard` or forced overwrite.
+Manual Git pulls should be performed only while Runner is stopped.
+
+Durable state still lives in `~/.t3/runner/`: `projects.json`,
+`config.json`, logs, lock and heartbeat. Project `.t3/tasks.json` and
+`.t3/runtime.json` are unchanged. Legacy `~/.t3/companion/runner` installs
+are detected for migration; the old executable files are not deleted.
+
+Git and Node.js 22.16+ must be available on the selected T3 execution host.

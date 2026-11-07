@@ -189,7 +189,7 @@ export function RunnerExpander({
                       onConfirmReinstall();
                     }}
                   >
-                    Re-install Runner
+                    Refresh checkout (git pull)
                   </button>
                   <div className="service-menu-divider" role="separator" />
                   <button

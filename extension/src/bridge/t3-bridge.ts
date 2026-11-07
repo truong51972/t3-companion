@@ -205,7 +205,8 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
       const errors = [...before.matchAll(/(?:^|\n)T3_COMPANION_ERROR:([^\r\n]*)/g)];
       const result = results.at(-1)?.[1];
       const error = errors.at(-1)?.[1];
-      if (end[1] !== '0') throw new Error(error || 'Companion terminal command failed on T3 host');
+      if (end[1] !== '0') throw new Error(error ||
+        'Companion command failed on T3 host: ' + before.slice(-500).replace(/\s+/g, ' ').trim());
       if (!result) throw new Error('Companion command did not return a structured result');
       return result;
     }
@@ -215,11 +216,39 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
   }
 }
 
-/** Runner stays independent of this terminal's lifecycle. */
-export function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
+/** Update the Git checkout only after the running worker pool has drained.
+ * CLI and data paths stay stable across installs and upgrades. */
+export async function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   verb: RunnerVerb, target?: string): Promise<string> {
-  return terminalCommand(tabId, environmentId, project, hostThreadId,
-    marker => runnerShellCommand(verb, target, marker), ['install', 'update', 'reinstall'].includes(verb) ? 150000 : verb === 'status' ? 18000 : 38000);
+  const command = (action: RunnerVerb) => terminalCommand(tabId, environmentId, project, hostThreadId,
+    marker => runnerShellCommand(action, target, marker),
+    ['install', 'update', 'reinstall'].includes(action) ? 150000 : action === 'status' ? 18000 : 38000);
+  if (verb !== 'update' && verb !== 'reinstall') return command(verb);
+  const before = JSON.parse(await command('status')) as {
+    installed?: boolean; running?: boolean; bridgeMissing?: boolean;
+    checkoutDirty?: boolean; originTrusted?: boolean;
+  };
+  // Legacy installations are migrated with one clone; no deletion of old files.
+  if (before.bridgeMissing) return command('install');
+  if (!before.installed) throw new Error('Runner is not installed; clone it from Overview first.');
+  if (before.checkoutDirty) throw new Error('Runner checkout has local changes; resolve them before git pull.');
+  if (before.originTrusted === false) throw new Error('Runner Git origin is not the trusted repository.');
+  if (!before.running) return command(verb);
+  await command('stop');
+  let stopped = false;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const snapshot = JSON.parse(await command('status')) as { running?: boolean };
+    if (!snapshot.running) { stopped = true; break; }
+  }
+  if (!stopped) throw new Error('Runner is still draining active tasks; Git checkout was not updated.');
+  try { await command(verb); }
+  catch (error) {
+    // A rejected ff-only pull does not alter running tasks or their durable state.
+    await command('start').catch(() => {});
+    throw error;
+  }
+  return command('start');
 }
 
 /** The installer uses npx skills add with the selected project's cwd; no automatic install. */
