@@ -92,6 +92,6 @@ export async function createTask(projectInput: string, title: string, prompt: st
   const project = await fs.realpath(path.resolve(projectInput));
   if (!title.trim() || !prompt.trim()) throw new Error('Task title and prompt are required');
   const doc = await readTasks(project);
-  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', executionRequests: [{ requestId: randomUUID(), ...(worktree ? { worktree } : {}) }] };
+  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', executionRequests: [{ requestId: randomUUID(), workspace: worktree ? 'worktree' : 'auto', ...(worktree ? { worktree } : {}) }] };
   doc.tasks.push(task); await atomicWrite(filesFor(project).tasks, doc); return task;
 }
