@@ -5,8 +5,11 @@ import { homedir } from 'node:os';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'awaiting_merge' | 'done';
 export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed' | 'needs_reconciliation';
-export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: 'auto' | 'root' | 'worktree' }
-export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; executionRequests?: ExecutionRequest[] }
+export type WorkspaceMode = 'auto' | 'root' | 'worktree';
+export interface TaskModelSelection { instanceId: string; model: string }
+export interface TaskExecutionSettings { workspace: WorkspaceMode; baseRef?: string; branch?: string; modelSelection?: TaskModelSelection; notBefore?: string }
+export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: WorkspaceMode; execution?: TaskExecutionSettings }
+export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; execution?: TaskExecutionSettings; executionRequests?: ExecutionRequest[] }
 export interface TaskDocument { version: 1; tasks: Task[] }
 export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
 export interface RuntimeDocument { version: 1; requests: Record<string, RuntimeRecord> }
@@ -76,16 +79,29 @@ export async function unregisterProject(input: string, home = defaultHome()): Pr
   return remaining;
 }
 
+export function validExecutionSettings(v: any): v is TaskExecutionSettings {
+  return v && typeof v === 'object' && !Array.isArray(v) &&
+    ['auto', 'root', 'worktree'].includes(v.workspace) &&
+    (v.baseRef === undefined || (typeof v.baseRef === 'string' && !!v.baseRef.trim())) &&
+    (v.branch === undefined || (typeof v.branch === 'string' && !!v.branch.trim())) &&
+    (v.notBefore === undefined || (typeof v.notBefore === 'string' && !Number.isNaN(Date.parse(v.notBefore)))) &&
+    (v.modelSelection === undefined || (v.modelSelection &&
+      typeof v.modelSelection.instanceId === 'string' && !!v.modelSelection.instanceId.trim() &&
+      typeof v.modelSelection.model === 'string' && !!v.modelSelection.model.trim())) &&
+    !(v.workspace === 'root' && (v.baseRef || v.branch)) &&
+    !(v.branch && !v.baseRef && v.workspace !== 'auto');
+}
 function validTaskDocument(data: any): data is TaskDocument {
   const ids = new Set<string>();
   const requestIds = new Set<string>();
   return data?.version === 1 && Array.isArray(data.tasks) && data.tasks.every((task: any) => {
-    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','awaiting_merge','done'].includes(task.status)) return false;
+    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) || typeof task.title !== 'string' || typeof task.prompt !== 'string' || !['todo','in_progress','review','awaiting_merge','done'].includes(task.status) || (task.execution !== undefined && !validExecutionSettings(task.execution))) return false;
     ids.add(task.id);
     return task.executionRequests === undefined || (Array.isArray(task.executionRequests) && task.executionRequests.every((req: any) => {
       if (!req || typeof req.requestId !== 'string' || !req.requestId || requestIds.has(req.requestId)) return false;
       requestIds.add(req.requestId);
-      return (req.worktree === undefined || typeof req.worktree === 'string') &&
+      return (req.execution === undefined || validExecutionSettings(req.execution)) &&
+        (req.worktree === undefined || typeof req.worktree === 'string') &&
         (req.workspace === undefined || ['auto','root','worktree'].includes(req.workspace)) &&
         (req.notBefore === undefined || typeof req.notBefore === 'string');
     }));
