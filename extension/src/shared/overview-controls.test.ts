@@ -6,8 +6,8 @@ const code = readFileSync(new URL('../sidepanel/main.tsx', import.meta.url), 'ut
 const css = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
 
 test('Runner and Agent Skill expander start collapsed and expose status in summary', () => {
-  assert.match(code, /<details className="overview-expander">\s*<summary><span className="overview-expander-title">Runner<\/span>/);
-  assert.match(code, /<details className="overview-expander">\s*<summary><span className="overview-expander-title">Agent Skill<\/span>/);
+  assert.match(code, /<details className="overview-expander">\s*<summary><Chevron\/><span className="overview-expander-title">Runner<\/span>/);
+  assert.match(code, /<details className="overview-expander">\s*<summary><Chevron\/><span className="overview-expander-title">Agent Skill<\/span>/);
   assert.doesNotMatch(code, /<details className="overview-expander" open>/);
 });
 
@@ -46,4 +46,20 @@ test('service panels do not show a disabled legacy setting or redundant metadata
   assert.match(code, /<div className="service-tools">/);
   assert.match(code, /<svg aria-hidden="true" viewBox="0 0 24 24"/);
   assert.match(css, /\.overview-expander \.runner-config\{[\s\S]*?border:0;background:transparent/);
+});
+
+test('all disclosure arrows use one aligned SVG chevron with stateful rotation', () => {
+  assert.match(code, /function Chevron\(/);
+  assert.match(code, /<path d="m6 9 6 6 6-6"\/>/);
+  for (const label of ['Runner', 'Agent Skill', 'Browser Data'])
+    assert.ok(code.includes('<summary><Chevron/><span className="overview-expander-title">' + label + '</span>'));
+  assert.match(code, /<Chevron className=\{'lane-chevron' \+ \(expanded \? ' is-open' : ''\)\}\/>/);
+  assert.match(code, /<summary>Advanced options<Chevron\/><\/summary>/);
+  assert.match(code, /<summary><Chevron\/>Diagnostics<\/summary>/);
+  assert.match(code, /<summary><Chevron\/>Manual setup<\/summary>/);
+  assert.match(css, /\.disclosure-chevron\{[\s\S]*?transform:rotate\(-90deg\)/);
+  assert.match(css, /\.overview-expander\[open\]>summary>\.disclosure-chevron/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.disclosure-chevron\{transition:none\}\}/);
+  assert.doesNotMatch(css, /content:'›'/);
+  assert.doesNotMatch(css, /content:'⌄'/);
 });
