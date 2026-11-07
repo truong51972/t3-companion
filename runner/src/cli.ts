@@ -2,6 +2,7 @@
 import { promises as fs } from 'node:fs';
 import { createTask, defaultHome, listProjects, registerProject, unregisterProject, readRunnerSettings, saveRunnerSettings } from './storage.ts';
 import { runRunner, startDetached, requestStop, status } from './runner.ts';
+import { findT3Cli } from './t3-cli.ts';
 
 const [, , command, ...args] = process.argv;
 const usage = `t3-runner <command>
@@ -30,7 +31,7 @@ try {
   }
   else if (command === 'start') result = { pid: await startDetached() };
   else if (command === 'stop') result = { requested: await requestStop() };
-  else if (command === 'status') result = { ...await status(), home: defaultHome(), settings: await readRunnerSettings() };
+  else if (command === 'status') result = { ...await status(), home: defaultHome(), settings: await readRunnerSettings(), cli: await findT3Cli() };
   else { console.log(usage); process.exitCode = 2; }
   if (result !== undefined) console.log(JSON.stringify(result, null, 2));
 } catch (e: any) { console.error(e.message); process.exitCode = 1; }
