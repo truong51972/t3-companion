@@ -17,7 +17,17 @@ export interface ChangeRequest {
 
 export type WorkspaceMode = 'auto' | 'root' | 'worktree';
 
+export interface TaskModelSelection { instanceId: string; model: string }
+export interface TaskExecutionSettings {
+  workspace: WorkspaceMode;
+  baseRef?: string;
+  branch?: string;
+  modelSelection?: TaskModelSelection;
+  notBefore?: string;
+}
+
 export interface ExecutionRequest {
+  execution?: TaskExecutionSettings;
   requestId: string;
   notBefore?: string;
   worktree?: string;
@@ -32,6 +42,7 @@ export interface Task {
   status: TaskStatus;
   statusOverride?: boolean;
   priority?: number;
+  execution?: TaskExecutionSettings;
   executionRequests?: ExecutionRequest[];
 }
 
@@ -77,7 +88,24 @@ export const blankTask = (): Task => ({
   prompt: '',
   status: 'todo',
   priority: 2,
+  execution: { workspace: 'auto' },
 });
+
+export function validExecutionSettings(value: unknown): value is TaskExecutionSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Partial<TaskExecutionSettings>;
+  if (!['auto', 'root', 'worktree'].includes(v.workspace || '') ||
+      (v.baseRef !== undefined && (typeof v.baseRef !== 'string' || !v.baseRef.trim())) ||
+      (v.branch !== undefined && (typeof v.branch !== 'string' || !v.branch.trim())) ||
+      (v.notBefore !== undefined && (typeof v.notBefore !== 'string' || Number.isNaN(Date.parse(v.notBefore)))) ||
+      (v.modelSelection !== undefined &&
+        (!v.modelSelection || typeof v.modelSelection.instanceId !== 'string' ||
+         !v.modelSelection.instanceId.trim() || typeof v.modelSelection.model !== 'string' ||
+         !v.modelSelection.model.trim()))) return false;
+  if (v.workspace === 'root' && (v.baseRef || v.branch)) return false;
+  if (v.branch && !v.baseRef && v.workspace !== 'auto') return false;
+  return true;
+}
 
 export function validateTasks(data: unknown): TasksDocument {
   const doc = data as TasksDocument;
@@ -90,6 +118,11 @@ export function validateTasks(data: unknown): TasksDocument {
         typeof t.id === 'string' &&
         typeof t.title === 'string' &&
         typeof t.prompt === 'string' &&
+        (t.execution === undefined || validExecutionSettings(t.execution)) &&
+        (t.executionRequests === undefined || (Array.isArray(t.executionRequests) &&
+          t.executionRequests.every((r: ExecutionRequest) =>
+            r && typeof r.requestId === 'string' &&
+            (r.execution === undefined || validExecutionSettings(r.execution))))) &&
         BOARD_COLUMNS.some(c => c.key === t.status)
     )
   ) {
