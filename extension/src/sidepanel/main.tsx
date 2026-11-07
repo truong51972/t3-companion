@@ -790,6 +790,43 @@ function App() {
     window.addEventListener('blur', onCancel);
   }
 
+  function keyboardMoveTask(event: React.KeyboardEvent<HTMLButtonElement>, task: Task) {
+    const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+    if (!keys.includes(event.key) || busy) return;
+    const currentStatus = taskColumn(task);
+    const currentColumn = columns.findIndex(col => col.key === currentStatus);
+    if (currentColumn < 0) return;
+    const currentLane = tasks.tasks.filter(item => taskColumn(item) === currentStatus);
+    const index = currentLane.findIndex(item => item.id === task.id);
+    let destination = currentStatus;
+    let beforeTaskId: string | undefined;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const delta = event.key === 'ArrowLeft' ? -1 : 1;
+      const next = columns[currentColumn + delta];
+      if (!next) return;
+      destination = next.key;
+    } else {
+      if (event.key === 'ArrowUp' && index > 0) beforeTaskId = currentLane[index - 1]?.id;
+      else if (event.key === 'ArrowDown' && index < currentLane.length - 1)
+        beforeTaskId = currentLane[index + 2]?.id;
+      else return;
+    }
+    event.preventDefault(); event.stopPropagation();
+    if (compactBoard && !expandedLanes[destination]) {
+      const expanded = { ...expandedLanes, [destination]: true };
+      setExpandedLanes(expanded);
+      setPreferences(previous => ({ ...previous, expandedLanes: expanded }));
+    }
+    void action(async () => {
+      await moveTask(task, destination, beforeTaskId);
+      requestAnimationFrame(() => {
+        const grip = Array.from(document.querySelectorAll<HTMLElement>('.task-card[data-task-id] .drag-handle'))
+          .find(element => element.closest<HTMLElement>('.task-card')?.dataset.taskId === task.id);
+        grip?.focus();
+      });
+    });
+  }
+
   useEffect(() => () => {
     // A project/environment switch must never dispatch a stale drag.
     pointerDrag.current?.cleanup();
@@ -952,8 +989,10 @@ function App() {
                         event.stopPropagation();
                       }
                     }}>
-                  <button type="button" className="drag-handle" aria-label={'Drag or move ' + task.title}
-                    title="Drag to move or reorder; use Move to for keyboard access">⠿</button>
+                  <button type="button" className="drag-handle"
+                    aria-label={'Move ' + task.title + '. Drag with mouse or touch; use arrow keys to move.'}
+                    title="Drag task or use arrow keys to move between statuses / reorder"
+                    onKeyDown={event => keyboardMoveTask(event, task)}>⠿</button>
                   <button className="task-open" type="button" aria-label={'View details for ' + task.title} onClick={() => openTask(task)}>
                     <span className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</span>
                     {task.description && <span className="task-description">{task.description}</span>}
