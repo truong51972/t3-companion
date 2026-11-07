@@ -8,10 +8,10 @@ export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed'
 export type WorkspaceMode = 'auto' | 'root' | 'worktree';
 export interface TaskModelSelection { instanceId: string; model: string }
 export interface TaskExecutionSettings { workspace: WorkspaceMode; baseRef?: string; branch?: string; modelSelection?: TaskModelSelection; notBefore?: string }
-export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: WorkspaceMode; execution?: TaskExecutionSettings }
+export interface ExecutionRequest { requestId: string; execution: TaskExecutionSettings }
 export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; execution?: TaskExecutionSettings; executionRequests?: ExecutionRequest[] }
 export interface TaskDocument { version: 1; tasks: Task[] }
-export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
+export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
 export interface RuntimeDocument { version: 1; requests: Record<string, RuntimeRecord> }
 // Durable state lives beside Companion code, not in T3's global user directory.
 export const defaultHome = () => path.resolve(
@@ -103,10 +103,7 @@ function validTaskDocument(data: any): data is TaskDocument {
     return task.executionRequests === undefined || (Array.isArray(task.executionRequests) && task.executionRequests.every((req: any) => {
       if (!req || typeof req.requestId !== 'string' || !req.requestId || requestIds.has(req.requestId)) return false;
       requestIds.add(req.requestId);
-      return (req.execution === undefined || validExecutionSettings(req.execution)) &&
-        (req.worktree === undefined || typeof req.worktree === 'string') &&
-        (req.workspace === undefined || ['auto','root','worktree'].includes(req.workspace)) &&
-        (req.notBefore === undefined || typeof req.notBefore === 'string');
+      return validExecutionSettings(req.execution);
     }));
   });
 }
@@ -126,11 +123,12 @@ export async function readRuntime(project: string): Promise<RuntimeDocument> {
 }
 export async function saveRuntime(project: string, doc: RuntimeDocument) { await atomicWrite(filesFor(project).runtime, doc); }
 
-// CLI fallback for smoke tests; browser extension is the intended owner of tasks.json.
+// Minimal CLI task creation; browser extension is the intended owner of tasks.json.
 export async function createTask(projectInput: string, title: string, prompt: string, worktree?: string) {
   const project = await fs.realpath(path.resolve(projectInput));
   if (!title.trim() || !prompt.trim()) throw new Error('Task title and prompt are required');
   const doc = await readTasks(project);
-  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', executionRequests: [{ requestId: randomUUID(), workspace: worktree ? 'worktree' : 'auto', ...(worktree ? { worktree } : {}) }] };
+  const execution: TaskExecutionSettings = { workspace: worktree ? 'worktree' : 'auto', ...(worktree ? { baseRef: worktree } : {}) };
+  const task: Task = { id: randomUUID(), title, prompt, status: 'todo', execution, executionRequests: [{ requestId: randomUUID(), execution: { ...execution } }] };
   doc.tasks.push(task); await atomicWrite(filesFor(project).tasks, doc); return task;
 }

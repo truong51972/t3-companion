@@ -8,12 +8,6 @@ export type Project = { id: string; title: string; workspaceRoot: string; defaul
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
 export type Shell = { projects: Project[]; threads: Thread[] };
 
-export async function activeTab(): Promise<chrome.tabs.Tab> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw new Error('No active browser tab');
-  return tab;
-}
-
 /** Read-only DOM + PWA fingerprint check. Session access happens only in the dedicated page adapter. */
 export async function detectTab(tab: chrome.tabs.Tab): Promise<boolean> {
   if (!tab.id || !isSafeOrigin(tab.url)) return false;
@@ -66,7 +60,7 @@ export async function describeEnvironment(tabId: number, preferredEnvironmentId 
 }
 
 const METHOD_ALLOWLIST = new Set([
-  'orchestration.subscribeShell', 'orchestration.launchThread', 'orchestration.dispatchCommand',
+  'orchestration.subscribeShell',
   'projects.readFile', 'projects.writeFile', 'vcs.listRefs', 'server.getConfig',
   'terminal.open', 'terminal.write', 'terminal.observe', 'terminal.close',
 ]);
@@ -150,24 +144,6 @@ export async function isProjectSkillInstalled(tabId: number, environmentId: stri
   return /^name:\s*t3-companion\s*$/m.test(result.contents || '');
 }
 
-export async function launchThread(tabId: number, environmentId: string, project: Project, prompt: string, fallbackModel?: { instanceId: string; model: string }): Promise<string> {
-  const model = project.defaultModelSelection || fallbackModel;
-  if (!model) throw new Error('Select a default model in T3 project settings or open a T3 session first');
-  const result = await rpc<{threadId: string}>(tabId, environmentId, 'orchestration.launchThread', {
-    commandId: crypto.randomUUID(), creationSource: 'web', threadId: crypto.randomUUID(), projectId: project.id,
-    title: prompt.slice(0, 80), modelSelection: model,
-    runtimeMode: 'full-access', interactionMode: 'default', workspaceStrategy: { type: 'root' },
-    initialMessage: { text: prompt, attachments: [] },
-  });
-  return result.threadId;
-}
-export async function sendThread(tabId: number, environmentId: string, threadId: string, prompt: string): Promise<void> {
-  await rpc(tabId, environmentId, 'orchestration.dispatchCommand', {
-    type: 'message.dispatch', commandId: crypto.randomUUID(), threadId, messageId: crypto.randomUUID(),
-    text: prompt, attachments: [], createdBy: 'user', creationSource: 'web', dispatchMode: { type: 'queue_after_active' },
-  });
-}
-
 /** Runs one bounded terminal operation in the selected T3 environment. */
 async function terminalCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   commandFor: (marker: string) => string, timeoutMs: number): Promise<string> {
@@ -235,11 +211,9 @@ export async function runnerCommand(tabId: number, environmentId: string, projec
     ['install', 'update', 'reinstall'].includes(action) ? 150000 : action === 'status' ? 18000 : 38000);
   if (verb !== 'update' && verb !== 'reinstall') return command(verb);
   const before = JSON.parse(await command('status')) as {
-    installed?: boolean; running?: boolean; bridgeMissing?: boolean;
+    installed?: boolean; running?: boolean;
     checkoutDirty?: boolean; originTrusted?: boolean;
   };
-  // Legacy installations are migrated with one clone; no deletion of old files.
-  if (before.bridgeMissing) return command('install');
   if (!before.installed) throw new Error('Runner is not installed; clone it from Overview first.');
   if (before.checkoutDirty) throw new Error('Runner checkout has local changes; resolve them before git pull.');
   if (before.originTrusted === false) throw new Error('Runner Git origin is not the trusted repository.');

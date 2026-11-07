@@ -33,8 +33,7 @@ export function RunnerExpander({
   const runnerActionsMenu = useRef<HTMLDetailsElement>(null);
   const errorToShow = runnerStatusError || runner.error;
 
-  const runnerInstalled = runner.installed ? 'true' : 'false';
-  const runnerBridgeMissing = runner.bridgeMissing;
+  const runnerInstalled = runner.installed;
   const runnerUpgradeRequired = runner.upgradeRequired;
   const runnerScanInterval = runner.scanIntervalMs;
 
@@ -85,9 +84,9 @@ export function RunnerExpander({
               CLI: {runner.cliCommand}
             </span>
           )}
-          {runnerInstalled === 'true' && (runnerUpgradeRequired || !runnerScanInterval) ? (
+          {runnerInstalled && (runnerUpgradeRequired || !runnerScanInterval) ? (
             <div className="service-info service-info-upgrade">
-              <span>Legacy Runner · update to enable scheduler settings and workflow scanning.</span>
+              <span>Runner installation is incomplete. Update to restore scheduler controls.</span>
               <button
                 type="button"
                 className="text-action"
@@ -98,7 +97,7 @@ export function RunnerExpander({
               </button>
             </div>
           ) : (
-            runnerInstalled === 'true' && !runnerBridgeMissing && (
+            runnerInstalled && (
               <div className="runner-config" role="group" aria-label="Runner scheduler settings">
                 <label htmlFor="runner-max-concurrent">Max concurrent</label>
                 <select
@@ -134,17 +133,16 @@ export function RunnerExpander({
             </div>
           )}
           <div className="service-actions" aria-label="Runner controls">
-            {(!runner.installed || runner.bridgeMissing) && (
+            {!runner.installed && (
               <button
                 className="primary"
                 disabled={busy || runnerBusy || !runnerHostAvailable}
                 onClick={() => void onManageRunner('install')}
               >
-                {runner.bridgeMissing && runner.installed ? 'Set up controls' : 'Install & Start'}
+                Install & Start
               </button>
             )}
             {runner.installed &&
-              !runner.bridgeMissing &&
               !runner.starting &&
               !runner.running && (
                 <button
@@ -159,7 +157,7 @@ export function RunnerExpander({
               <ServiceRefresh service="Runner" refreshing={runnerBusy}
                 disabled={busy || !runnerHostAvailable}
                 onRefresh={() => void onManageRunner('status')}/>
-              {runner.installed && !runner.bridgeMissing && (
+              {runner.installed && (
                 <ServiceMore service="Runner" menuRef={runnerActionsMenu}>
                   {runner.running && (
                     <button type="button"

@@ -5,10 +5,7 @@ export const RUNNER_CHECKOUT = '~/t3-companion';
 const ENTRY = "try{require(require('node:path').join(require('node:os').homedir(),'t3-companion','runner','bin','companion-control.cjs'))}" +
   "catch(e){console.log('T3_COMPANION_ERROR:'+String(e.message||e).slice(-500));console.log(process.argv[3]+':1');process.exitCode=1}";
 const STATUS = "const p=require('node:path'),h=require('node:os').homedir(),f=require('node:fs'),s=p.join(h,'t3-companion','runner','bin','companion-control.cjs');" +
-  "if(f.existsSync(s))require(s);else{const legacy=f.existsSync(p.join(h,'.t3','companion','runner','bin','t3-runner.mjs'))||" +
-  "f.existsSync(p.join(h,'.t3','t3-companion','runner','bin','t3-runner.mjs'));" +
-  "let pid=null,running=false;try{pid=JSON.parse(f.readFileSync(p.join(h,'.t3','runner','runner.lock','owner.json'),'utf8')).pid;process.kill(pid,0);running=true}catch{}" +
-  "console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:legacy,running,pid:running?pid:null,version:null,bridgeMissing:legacy,upgradeRequired:legacy}));console.log(process.argv[3]+':0')}";
+  "if(f.existsSync(s))require(s);else{console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:false,running:false,pid:null,version:null,upgradeRequired:false}));console.log(process.argv[3]+':0')}";
 function encodeTarget(target: string): string {
   const bytes = Array.from(new TextEncoder().encode(target), byte => String.fromCharCode(byte)).join('');
   return btoa(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
