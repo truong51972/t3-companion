@@ -640,3 +640,53 @@ button.compact{padding:6px 10px}
 .advanced-options>summary>.disclosure-chevron{margin-left:auto}
 .lane-title>.lane-chevron{width:14px;height:14px;flex-basis:14px}
 @media(prefers-reduced-motion:reduce){.disclosure-chevron{transition:none}}
+
+
+/* Pointer-based Board drag: full-card mouse target, explicit touch grip.
+   Never use HTML5 draggable on nested buttons in Chromium Side Panels. */
+.task-card{position:relative;touch-action:pan-y;cursor:grab}
+.task-card .task-open{cursor:grab;user-select:none}
+.task-card .task-footer,.task-card .task-footer button,
+.task-card .task-more summary{cursor:pointer}
+.task-card .drag-handle{
+  display:grid;place-items:center;right:5px;top:5px;
+  width:32px;height:32px;padding:0;border-radius:6px;
+  z-index:1;touch-action:none;cursor:grab;
+  font-size:18px;line-height:1;color:#a9b3c4;
+}
+.task-card:hover .drag-handle,.task-card .drag-handle:focus-visible{
+  color:#dbe6f6;background:#343b46;border-color:#535f70;
+}
+.board-pointer-dragging,.board-pointer-dragging *{
+  cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important
+}
+.task-dragging{opacity:.36;box-shadow:none}
+.board-drag-preview{
+  position:fixed;z-index:3000;pointer-events:none;
+  display:flex;align-items:center;gap:9px;
+  width:min(220px,calc(100vw - 20px));min-height:40px;
+  padding:9px 12px;overflow:hidden;
+  background:#353e4c;color:#e7edf7;border:1px solid #8096b7;
+  border-radius:9px;box-shadow:0 14px 34px #000b;
+  font-size:12px;font-weight:600;line-height:1.35;
+}
+.board-drag-preview span:last-child{
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.board-drag-preview-icon{flex:none;font-size:17px;color:#b5c9e8}
+.task-drop-before::before,.task-drop-after::after{
+  content:'';position:absolute;left:3px;right:3px;
+  height:3px;border-radius:3px;background:#9dbcf3;
+  pointer-events:none;z-index:3;
+  box-shadow:0 0 0 2px #1d222a;
+}
+.task-drop-before::before{top:-6px}
+.task-drop-after::after{bottom:-6px}
+.lane-drop-target{border-color:#758db5!important;background:#222a35!important}
+.lane-drop-target .lane-heading{background:#2b3647}
+@media(hover:none){
+  .task-card .drag-handle{background:#303744;border:1px solid #44536a}
+}
+@media(prefers-reduced-motion:reduce){
+  .board-drag-preview,.task-card{transition:none}
+}
