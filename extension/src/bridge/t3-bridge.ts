@@ -8,6 +8,12 @@ export type Project = { id: string; title: string; workspaceRoot: string; defaul
 export type Thread = { id: string; projectId: string; title: string; status: string; modelSelection?: { instanceId: string; model: string } };
 export type Shell = { projects: Project[]; threads: Thread[] };
 
+export async function activeTab(): Promise<chrome.tabs.Tab> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active browser tab');
+  return tab;
+}
+
 /** Read-only DOM + PWA fingerprint check. Session access happens only in the dedicated page adapter. */
 export async function detectTab(tab: chrome.tabs.Tab): Promise<boolean> {
   if (!tab.id || !isSafeOrigin(tab.url)) return false;
