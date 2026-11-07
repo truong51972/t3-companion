@@ -22,9 +22,7 @@ import {
   loadPreferences,
   parseCache,
   persistPreferences,
-  scopeKey,
   type CompanionPreferences,
-  type WorkspaceMode,
 } from '../shared/preferences';
 import { moveBoardItem } from '../shared/board-move';
 import {
@@ -49,7 +47,6 @@ import {
   type ConfirmDialogState,
 } from './components/Modals/ConfirmModal';
 import { TaskEditorModal } from './components/Modals/TaskEditorModal';
-import { QueueModal } from './components/Modals/QueueModal';
 import { TaskDetailsModal } from './components/Modals/TaskDetailsModal';
 import { useCompactBoard } from './hooks/useCompactBoard';
 import { useMenuDismissal } from './hooks/useMenuDismissal';
@@ -113,7 +110,6 @@ function App() {
   // Modal dialog states
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [queueTarget, setQueueTarget] = useState<Task | null>(null);
   const [detailsTaskId, setDetailsTaskId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmDialogState | null>(null);
@@ -145,6 +141,20 @@ function App() {
     [projects, projectId]
   );
   const visibleThreads = threads.filter(t => t.projectId === projectId);
+  const availableModels = useMemo(() => {
+    const models = [currentProject?.defaultModelSelection,
+      ...threads.filter(t => t.projectId === projectId).map(t => t.modelSelection)];
+    const seen = new Set<string>();
+    return models.filter((model): model is { instanceId: string; model: string } =>
+      Boolean(model && typeof model.instanceId === 'string' && model.instanceId &&
+        typeof model.model === 'string' && model.model))
+      .filter(model => {
+        const key = model.instanceId + ':' + model.model;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [currentProject?.defaultModelSelection, threads, projectId]);
   const runnerHost = threads.find(t => projects.some(p => p.id === t.projectId));
   const runnerHostProject = runnerHost && projects.find(p => p.id === runnerHost.projectId);
   const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
@@ -359,7 +369,6 @@ function App() {
           setSkillCacheAt(null);
           setDetailsTaskId(null);
           setEditingTask(null);
-          setQueueTarget(null);
           setRunnerResult('Not checked');
           setRunnerStatusError('');
           setNotice('');
@@ -737,61 +746,37 @@ function App() {
     );
   }
 
-  async function enqueue(
-    task: Task,
-    workspaceMode: WorkspaceMode,
-    worktree: string,
-    schedule: string
-  ) {
+  async function enqueue(task: Task) {
     if (parsedRunner.installed && !parsedRunner.bridgeMissing && runnerHostAvailable)
       await manageRunner('add');
-    const when = schedule ? new Date(schedule).toISOString() : undefined;
     await mutateTask(
       task.id,
       document => ({
         ...document,
-        tasks: document.tasks.map(t =>
-          t.id === task.id
-            ? {
-                ...t,
-                status: 'todo' as TaskStatus,
-                statusOverride: false,
-                executionRequests: [
-                  ...(t.executionRequests || []),
-                  {
-                    requestId: crypto.randomUUID(),
-                    ...(when ? { notBefore: when } : {}),
-                    ...(workspaceMode !== 'root' && worktree.trim()
-                      ? { worktree: worktree.trim() }
-                      : {}),
-                    workspace: workspaceMode,
-                  },
-                ],
-              }
-            : t
-        ),
+        tasks: document.tasks.map(t => {
+          if (t.id !== task.id) return t;
+          const config = structuredClone(t.execution || { workspace: 'auto' as const });
+          return {
+            ...t,
+            status: 'todo' as TaskStatus,
+            statusOverride: false,
+            executionRequests: [
+              ...(t.executionRequests || []),
+              {
+                requestId: crypto.randomUUID(),
+                execution: config,
+                ...(config.notBefore ? { notBefore: config.notBefore } : {}),
+              },
+            ],
+          };
+        }),
       }),
       task
     );
-    // Remember workspace settings
-    if (currentProject) {
-      setPreferences(p => ({
-        ...p,
-        workspaceByProject: {
-          ...p.workspaceByProject,
-          [scopeKey(environmentId, currentProject.workspaceRoot)]: {
-            mode: workspaceMode,
-            baseRef: worktree,
-          },
-        },
-      }));
-    }
     const ready = parsedRunner.installed && parsedRunner.running && runnerHostAvailable;
-    setNotice(
-      ready
-        ? 'Queued. Runner will dispatch when eligible.'
-        : 'Queued. Open Overview to verify Runner setup and project registration before execution.'
-    );
+    setNotice(ready
+      ? 'Queued with saved task settings. Runner will dispatch when eligible.'
+      : 'Queued with saved task settings. Verify Runner setup and registration in Overview.');
   }
 
   async function manageRunner(
@@ -973,9 +958,6 @@ function App() {
     },
   });
 
-  const savedWorkspace =
-    preferences.workspaceByProject[scopeKey(environmentId, currentProject?.workspaceRoot || '')];
-
   return (
     <main className="stack sidepanel">
       <Header
@@ -1063,7 +1045,7 @@ function App() {
           onOpenTask={task => {
             setDetailsTaskId(task.id);
           }}
-          onRequestExecution={task => setQueueTarget(task)}
+          onRequestExecution={task => void action(() => enqueue(task))}
           onEditTask={task => {
             setEditingTask(task);
             setIsEditorOpen(true);
@@ -1166,13 +1148,14 @@ function App() {
           setEditingTask(task);
           setIsEditorOpen(true);
         }}
-        onQueue={task => setQueueTarget(task)}
+        onQueue={task => void action(() => enqueue(task))}
         onOpenThread={openLinkedThread}
         busy={busy}
       />
       <TaskEditorModal
         open={isEditorOpen}
         task={editingTask}
+        availableModels={availableModels}
         onClose={() => {
           setIsEditorOpen(false);
           setEditingTask(null);
@@ -1180,20 +1163,6 @@ function App() {
         onSave={draft => action(() => saveTask(draft))}
         busy={busy}
       />
-      <QueueModal
-        open={Boolean(queueTarget)}
-        task={queueTarget}
-        runnerRunning={parsedRunner.running}
-        initialWorkspaceMode={savedWorkspace?.mode || 'auto'}
-        initialWorktree={savedWorkspace?.baseRef || ''}
-        onClose={() => setQueueTarget(null)}
-        onQueue={async (task, mode, worktree, schedule) => {
-          await action(() => enqueue(task, mode, worktree, schedule));
-          setQueueTarget(null);
-        }}
-        busy={busy}
-      />
-
       {/* Floating drag preview */}
       {dragPreview && (
         <div
