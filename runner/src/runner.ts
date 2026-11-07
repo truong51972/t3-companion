@@ -49,13 +49,14 @@ function gitOutput(project: string, args: string[]): string | null {
 }
 
 export function workspaceBaseFor(project: string, request: ExecutionRequest): string | null {
-  if (request.workspace === 'root') return null;
+  const configuration = request.execution;
+  if (configuration?.workspace === 'root' || request.workspace === 'root') return null;
   // An explicit worktree ref from the v1 contract always opts into isolation.
-  const explicit = request.worktree?.trim();
-  if (!request.workspace && !explicit) return null; // legacy requests stay on the shared checkout
+  const explicit = configuration ? configuration.baseRef?.trim() : request.worktree?.trim();
+  if (!configuration && !request.workspace && !explicit) return null; // legacy stays on shared checkout
   const isRepo = gitOutput(project, ['rev-parse', '--is-inside-work-tree']) === 'true';
   if (!isRepo) {
-    if (request.workspace === 'auto' && !explicit) return null; // non-Git projects use root
+    if ((configuration?.workspace || request.workspace) === 'auto' && !explicit) return null; // non-Git use root
     throw new Error('Worktree execution requires a Git repository');
   }
   const branch = explicit ||
@@ -68,9 +69,18 @@ export function workspaceBaseFor(project: string, request: ExecutionRequest): st
 export type Execute = (project: string, task: Task, request: ExecutionRequest) => Promise<{ status: 'completed' | 'blocked' | 'failed'; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }>;
 export const executeT3: Execute = async (project, task, request) => {
   const cli = await requireT3Cli();
-  const args = ['thread', 'start', project, '-', '--wait', '--json'];
+  const args = ['thread', 'start', project, '-', '--wait', '--json', '--title', task.title];
   const base = workspaceBaseFor(project, request);
   if (base) args.push('--worktree', base);
+  // T3's native CLI supports provider/model as a pair; never guess or use UI labels.
+  if (request.execution?.modelSelection) {
+    args.push('--provider', request.execution.modelSelection.instanceId,
+      '--model', request.execution.modelSelection.model);
+  }
+  if (request.execution?.branch) {
+    if (!base) throw new Error('A named worktree branch requires a Git base ref');
+    args.push('--branch', request.execution.branch);
+  }
   return new Promise((resolve, reject) => {
     const proc = spawn(cli, args, { cwd: project, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
@@ -152,10 +162,12 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             if (active.size >= poolLimit || stopping) break;
             if (await fs.stat(stopFile(home)).then(() => true, () => false)) { stopping = true; break; }
             if (runtime.requests[request.requestId]) continue;
-            if (request.notBefore && (Number.isNaN(Date.parse(request.notBefore)) || Date.parse(request.notBefore) > Date.now())) continue;
-            const sharedCheckout = request.workspace === 'root' ? true
-              : request.workspace === 'auto' ? gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true'
-              : request.workspace === 'worktree' ? false
+            const notBefore = request.notBefore || request.execution?.notBefore;
+            if (notBefore && (Number.isNaN(Date.parse(notBefore)) || Date.parse(notBefore) > Date.now())) continue;
+            const workspace = request.execution?.workspace || request.workspace;
+            const sharedCheckout = workspace === 'root' ? true
+              : workspace === 'auto' ? gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true'
+              : workspace === 'worktree' ? false
               : !request.worktree; // legacy behavior
             if (sharedCheckout && nonWorktreeProjects.has(project)) continue;
             const id = `${project}:${request.requestId}`;
