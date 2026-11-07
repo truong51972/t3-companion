@@ -442,3 +442,19 @@ button.compact{padding:6px 10px}
   .sidepanel .modal .modal-heading{padding-block:7px}
   .sidepanel .modal .modal-actions{padding-block:7px}
 }
+
+
+/* Five-lane lifecycle. Keep the new Review/Merge distinction readable in narrow panels. */
+.lane-icon.awaiting_merge{border-color:#ac9bc9;background:#333047}
+.execution-status.human_review{background:#4b352c;color:#edc3a6}
+.execution-status.awaiting_merge{background:#353047;color:#c8b8e5}
+.execution-status.done{background:#263d30;color:#b4d9c1}
+.request-info a{font-size:11px;line-height:1.5;color:#abc5ef;overflow-wrap:anywhere;word-break:break-word}
+@media (min-width:1500px) and (min-height:620px){
+  .board{grid-template-columns:repeat(5,minmax(0,1fr))}
+}
+@media (min-width:1200px) and (max-width:1499px) and (min-height:620px){
+  .board{height:auto;min-height:0;align-content:start;align-items:start;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .lane{height:auto;min-height:120px;max-height:none}
+  .lane-body{min-height:0;max-height:none;overflow:visible}
+}
