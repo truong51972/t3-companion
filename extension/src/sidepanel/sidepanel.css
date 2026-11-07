@@ -478,7 +478,8 @@ button.compact{padding:6px 10px}
 .service-refresh:hover:not(:disabled){background:#323640;border-color:#64738c;color:#f0f3f9}
 .service-refresh.is-refreshing>span{animation:service-refresh-spin 1.1s linear infinite}
 @keyframes service-refresh-spin{to{transform:rotate(360deg)}}
-.service-more{flex:0 0 auto;min-width:0;margin-left:auto}
+.service-actions>.service-refresh{margin-left:auto}
+.service-more{flex:0 0 auto;min-width:0;margin-left:0}
 .service-more>summary{
  display:flex;align-items:center;justify-content:center;gap:7px;
  min-height:32px;padding:6px 10px;border:1px solid #42464f;border-radius:6px;
