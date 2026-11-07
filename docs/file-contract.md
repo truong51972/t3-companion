@@ -2,9 +2,9 @@
 
 The Board and optional project Agent Skill can edit task definitions; the Runner alone owns execution metadata. All use the T3 environment's **project filesystem**, not a central server.
 
-## Registry — `~/.t3/runner/projects.json`
+## Registry — `~/t3-companion/.data/runner/projects.json`
 
-`{"projects":["/absolute/project/path"]}`. No per-project registry files. If T3 Code uses `T3CODE_HOME`, the Runner follows that environment variable unless `T3_COMPANION_HOME` overrides it.
+`{"projects":["/absolute/project/path"]}`. No per-project registry files. `T3_COMPANION_HOME` explicitly overrides the default Companion runtime home. `T3CODE_HOME` is read only to locate the previous runtime directory during migration.
 
 ## Tasks — `project/.t3/tasks.json`
 
@@ -76,5 +76,15 @@ This file is diagnostics-only and must never be treated as authority for task co
 The install at `~/t3-companion` is Git-managed, with source code only.
 It must not contain Runner's durable state. Updates use `git pull --ff-only`,
 with Runner drain/restart coordinated by the extension. State is retained in
-`~/.t3/runner`; legacy source at `~/.t3/companion/runner` or `~/.t3/t3-companion` is left intact
+`~/t3-companion/.data/runner`; legacy source at `~/.t3/companion/runner` or `~/.t3/t3-companion` is left intact
 after migration for safety.
+
+## Runtime home migration
+
+All mutable Runner files default to `~/t3-companion/.data/runner/`.
+The checkout's root `.gitignore` excludes `.data/`. The controller detects
+the previous `~/.t3/runner/` directory, requests a graceful stop of any
+Runner still using it, and imports regular files only once after it is
+inactive. It excludes `runner.lock/`, `stop.json`, and `health.json`.
+A `.legacy-import.json` marker makes the import idempotent. Conflicting
+files are never overwritten and the old directory is retained for recovery.

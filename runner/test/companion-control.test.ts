@@ -18,6 +18,7 @@ function fixture(t) {
   mkdirSync(path.dirname(control), { recursive: true });
   mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
   copyFileSync(src, control);
+  writeFileSync(path.join(root, '.gitignore'), '.data/\n');
   for (const name of ['cli.ts','runner.ts','storage.ts','workflow.ts',
     't3-cli.ts','lock.ts','reconciler.ts','adapters.ts'])
     writeFileSync(path.join(root, 'runner', 'src', name), '// bundled');
@@ -93,6 +94,43 @@ test('missing adapter module signals an incomplete Git checkout', t => {
   assert.equal(state.status, 0, state.stderr);
   assert.equal(state.data.upgradeRequired, true);
   assert.equal(state.data.checkoutDirty, true);
+});
+
+test('old Runner data migrates to .data/runner without moving transient files', t => {
+  const { run, root, home } = fixture(t);
+  const legacy = path.join(home, '.t3', 'runner');
+  const current = path.join(root, '.data', 'runner');
+  mkdirSync(legacy, { recursive: true });
+  writeFileSync(path.join(legacy, 'projects.json'), '{"projects":["/example/repo"]}\n');
+  writeFileSync(path.join(legacy, 'config.json'), '{"maxConcurrent":2,"scanIntervalMs":10000}\n');
+  writeFileSync(path.join(legacy, 'runner.log'), 'legacy log\n');
+  writeFileSync(path.join(legacy, 'health.json'), '{"pid":123}\n');
+  writeFileSync(path.join(legacy, 'stop.json'), '{"at":"old"}\n');
+  const started = run('start');
+  assert.equal(started.status, 0, started.stdout + started.stderr);
+  assert.equal(readFileSync(path.join(current, 'projects.json'), 'utf8'), '{"projects":["/example/repo"]}\n');
+  assert.equal(readFileSync(path.join(current, 'config.json'), 'utf8'), '{"maxConcurrent":2,"scanIntervalMs":10000}\n');
+  assert.equal(readFileSync(path.join(current, 'runner.log'), 'utf8'), 'legacy log\n');
+  assert.equal(readFileSync(path.join(legacy, 'projects.json'), 'utf8'), '{"projects":["/example/repo"]}\n');
+  assert.equal(existsSync(path.join(current, 'stop.json')), false);
+  assert.equal(existsSync(path.join(current, 'health.json')), false);
+  assert.equal(existsSync(path.join(current, '.legacy-import.json')), true);
+  assert.equal(git(root, 'status', '--porcelain'), '');
+});
+
+test('migration refuses to overwrite conflicting existing Runner data', t => {
+  const { run, root, home } = fixture(t);
+  const legacy = path.join(home, '.t3', 'runner');
+  const current = path.join(root, '.data', 'runner');
+  mkdirSync(legacy, { recursive: true });
+  mkdirSync(current, { recursive: true });
+  writeFileSync(path.join(legacy, 'projects.json'), '{"projects":["/old"]}\n');
+  writeFileSync(path.join(current, 'projects.json'), '{"projects":["/new"]}\n');
+  const response = run('start');
+  assert.equal(response.status, 1);
+  assert.match(response.stdout, /Runner data conflict/);
+  assert.equal(readFileSync(path.join(current, 'projects.json'), 'utf8'), '{"projects":["/new"]}\n');
+  assert.equal(existsSync(path.join(current, '.legacy-import.json')), false);
 });
 
 test('unknown verbs and invalid markers are rejected', t => {

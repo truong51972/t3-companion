@@ -29,9 +29,13 @@ test('Git checkout updates only code, preserving legacy files and durable Runner
   git('-C', source, 'config', 'user.email', 'test@example.invalid');
   git('-C', source, 'config', 'user.name', 'Companion Test');
   writeFileSync(path.join(source, 'README.md'), 'initial\n');
-  git('-C', source, 'add', 'README.md');
+  writeFileSync(path.join(source, '.gitignore'), '.data/\n');
+  git('-C', source, 'add', '.');
   git('-C', source, 'commit', '-m', 'initial');
   git('clone', source, checkout);
+  mkdirSync(path.join(checkout, '.data', 'runner'), { recursive: true });
+  writeFileSync(path.join(checkout, '.data', 'runner', 'health.json'), '{"pid":0}\n');
+  assert.equal(git('-C', checkout, 'status', '--porcelain'), '');
   const v1 = git('-C', checkout, 'rev-parse', 'HEAD');
   assert.equal(v1, git('-C', source, 'rev-parse', 'HEAD'));
   assert.ok(existsSync(path.join(checkout, '.git')));
@@ -46,6 +50,7 @@ test('Git checkout updates only code, preserving legacy files and durable Runner
   assert.equal(readFileSync(stateFile, 'utf8'), '{"projects":["/example/project"]}\n');
   assert.equal(readFileSync(legacyFile, 'utf8'), 'legacy binary');
   assert.equal(readFileSync(previousGitFile, 'utf8'), 'previous checkout stays untouched');
+  assert.equal(readFileSync(path.join(checkout, '.data', 'runner', 'health.json'), 'utf8'), '{"pid":0}\n');
 });
 
 /** A dirty checkout must not be silently reset, even if a new commit exists upstream. */

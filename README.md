@@ -39,10 +39,10 @@ Runner needs Node.js **22.16+** and a **T3 Code CLI executable on the selected e
 
 1. Open a T3 thread in the environment and select the project in Companion.
 2. Open **Overview → Runner** (collapsed by default). The Side Panel checks its status automatically after the initial UI render. Expand Runner for Start and Refresh; Stop and maintenance commands are under **More**.
-3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/t3-companion/` on the selected execution host and starts the bundled Runner. Existing registered projects, tasks and runtime history are preserved under `~/.t3/runner/`. Legacy installs (including the prior Git checkout in `~/.t3/t3-companion`) show **Setup required**; choose **Set up controls** to clone into the new location and migrate without deleting the previous installation.
+3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/t3-companion/` on the selected execution host and starts the bundled Runner. Existing registered projects, tasks and runtime history are preserved under `~/t3-companion/.data/runner/`. Legacy installs (including the prior Git checkout in `~/.t3/t3-companion`) show **Setup required**; choose **Set up controls** to clone into the new location and migrate without deleting the previous installation.
 4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
-Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
+Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\t3-companion\.data\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
 Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host, setup/start now reports an actionable error. Runner does not auto-download a different T3 version or silently fail queued tasks. Install the CLI on that same host, then refresh Runner and Start. If an old execution already failed with `spawn t3 ENOENT`, queue a **new** execution request; Runner does not replay historical failed requests automatically.
 
@@ -52,7 +52,7 @@ Runner control reuses the selected environment's authenticated T3 Terminal RPC, 
 
 **Side Panel lifecycle and width:** Companion now uses a **window-scoped** Side Panel instead of a tab-scoped panel. Switching to another tab should no longer trigger a tab-specific panel teardown; the UI keeps the last selected verified T3 session while browsing unrelated sites. Edge/Chromium still owns the resizable Side Panel frame; extensions cannot set its width via `chrome.sidePanel`, so actual width persistence remains browser-dependent.
 
-Runner code is a Git checkout. **Overview → Update Runner** drains running tasks before `git pull --ff-only`, then restarts only if previously running. The checkout must be clean and its Git origin must match this repository; no forced resets or file-copy upgrades occur. **After pulling new extension changes, rebuild and reload the extension**. Registry, runtime, tasks and worktrees remain untouched. **Overview → Runner** exposes Max Concurrent (1–3) in `~/.t3/runner/config.json`; Runner reloads it each dispatch pass. No background updates occur.
+Runner code is a Git checkout. **Overview → Update Runner** drains running tasks before `git pull --ff-only`, then restarts only if previously running. The checkout must be clean and its Git origin must match this repository; no forced resets or file-copy upgrades occur. **After pulling new extension changes, rebuild and reload the extension**. Registry, runtime, tasks and worktrees remain untouched. **Overview → Runner** exposes Max Concurrent (1–3) in `~/t3-companion/.data/runner/config.json`; Runner reloads it each dispatch pass. No background updates occur.
 
 ### Agent Skill — project-scoped, optional
 
@@ -154,3 +154,15 @@ Git and Node.js 22.16+ must be available on the selected T3 execution host.
 **Windows note:** The extension uses T3's environment platform to choose
 PowerShell-safe Git paths (`"$HOME/t3-companion"`) rather than sending
 POSIX `~` paths to native Git. No browser OS inference is used.
+
+### Companion data directory
+
+The Runner executable stays under `~/t3-companion/runner/`. Its mutable data
+(`projects.json`, `config.json`, `runner.log`, `health.json`, locks and
+stop requests) lives in `~/t3-companion/.data/runner/`, ignored by Git.
+On the first Start, Companion imports existing `~/.t3/runner/` state only
+after the previous Runner has stopped; transient locks, stop signals and
+heartbeats are never imported. Previous files remain as a backup. If files
+conflict, migration fails explicitly instead of overwriting either copy.
+The optional `T3_COMPANION_HOME` variable overrides the default runtime home.
+Per-project `.t3/tasks.json` and `.t3/runtime.json` remain unchanged.
