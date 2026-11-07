@@ -94,11 +94,18 @@ export interface T3GitRef {
   worktreePath: string | null;
 }
 export async function exploreProjectRefs(tabId: number, environmentId: string, cwd: string): Promise<T3GitRef[]> {
-  const result = await rpc<{ isRepo: boolean; refs: T3GitRef[]; nextCursor: number | null }>(
-    tabId, environmentId, 'vcs.listRefs', { cwd, limit: 200 }, 16000
-  );
-  if (!result.isRepo || !Array.isArray(result.refs)) return [];
-  return result.refs.filter(ref => typeof ref.name === 'string' && ref.name.length > 0);
+  const refs: T3GitRef[] = [];
+  let cursor: number | null = null;
+  for (let page = 0; page < 3; page++) {
+    const result: { isRepo: boolean; refs: T3GitRef[]; nextCursor: number | null } =
+      await rpc(tabId, environmentId, 'vcs.listRefs',
+        { cwd, limit: 200, ...(cursor === null ? {} : { cursor }) }, 16000);
+    if (!result.isRepo || !Array.isArray(result.refs)) break;
+    refs.push(...result.refs.filter(ref => typeof ref.name === 'string' && ref.name.length > 0));
+    if (result.nextCursor === null) break;
+    cursor = result.nextCursor;
+  }
+  return [...new Map(refs.map(ref => [ref.name, ref] as const)).values()];
 }
 
 /** Explicit on-demand model discovery from T3's own provider catalog. */

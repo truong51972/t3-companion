@@ -76,6 +76,12 @@ export function OverviewView({
   }))).filter(item => item.entry?.startedAt || item.entry?.finishedAt)
     .sort((a, b) => (b.entry?.startedAt || '').localeCompare(a.entry?.startedAt || '')).slice(0, 5);
 
+  const laneCounts = BOARD_COLUMNS.map(column => ({
+    ...column,
+    count: tasks.tasks.filter(task => getTaskColumn(task, runtime) === column.key).length,
+  }));
+  const doneCount = laneCounts.find(item => item.key === 'done')?.count || 0;
+  const completion = tasks.tasks.length ? Math.round(doneCount * 100 / tasks.tasks.length) : 0;
   const metrics = [
     { label: 'Tasks', value: tasks.tasks.length },
     {
@@ -131,6 +137,19 @@ export function OverviewView({
             </div>
           ))}
         </div>
+        <section className="overview-pipeline" aria-label="Project workflow distribution">
+          <div className="overview-pipeline-header">
+            <strong>Workflow</strong>
+            <span>{completion}% complete · {tasks.tasks.length} tasks</span>
+          </div>
+          <div className="overview-pipeline-track" role="img" aria-label={'Workflow complete: ' + completion + '%'}>
+            {laneCounts.map(column => column.count > 0 && (
+              <div key={column.key} className={'pipeline-segment ' + column.key}
+                style={{ width: (column.count / tasks.tasks.length * 100) + '%' }}
+                title={column.name + ': ' + column.count} />
+            ))}
+          </div>
+        </section>
         <div className="overview-breakdown" aria-label="Task status breakdown">
           {BOARD_COLUMNS.map(column => {
             const count = tasks.tasks.filter(

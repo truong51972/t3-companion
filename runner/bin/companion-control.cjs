@@ -202,7 +202,7 @@ async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
 
 async function main() {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid completion marker');
-  if (!['install','update','reinstall','status','start','stop','add','remove','configure'].includes(verb))
+  if (!['install','update','reinstall','status','start','stop','add','remove','inspect','configure'].includes(verb))
     throw new Error('Unknown Runner operation');
   if (verb === 'install' || verb === 'update' || verb === 'reinstall') {
     // For upgrades the optional third argument is the trusted release SHA
@@ -238,6 +238,12 @@ async function main() {
     if (!/^[1-3]$/.test(value)) throw new Error('Max concurrent must be 1..3');
     run('config', 'set', value);
     return state();
+  }
+  if (verb === 'inspect') {
+    if (!encodedTarget || !/^[A-Za-z0-9_-]+$/.test(encodedTarget)) throw new Error('Project path required');
+    const target = Buffer.from(encodedTarget, 'base64url').toString('utf8');
+    if (!target) throw new Error('Project path required');
+    return state({ projectInspection: run('inspect', target) });
   }
   if (verb === 'add' || verb === 'remove') {
     if (!encodedTarget || !/^[A-Za-z0-9_-]+$/.test(encodedTarget)) throw new Error('Project path required');

@@ -766,3 +766,17 @@ button.compact{padding:6px 10px}
 .task-advanced>summary>.muted{font-size:10px;font-weight:400;text-align:right}
 .task-advanced-content{display:grid;gap:12px;padding:12px;border-top:1px solid #3a4049}
 @media(max-width:420px){.task-config-pair{grid-template-columns:minmax(0,1fr)}.task-model-row{flex-wrap:wrap}.task-model-more{margin-left:auto}}
+
+/* Workflow overview: compact distribution without a tall empty dashboard chart. */
+.overview-pipeline{display:grid;gap:9px;background:#20252c;border:1px solid #363e4c;border-radius:9px;padding:12px}
+.overview-pipeline-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.overview-pipeline-header strong{font-size:12px;color:#e6ebf3}
+.overview-pipeline-header span{font-size:11px;color:#9daabc}
+.overview-pipeline-track{height:7px;width:100%;overflow:hidden;border-radius:6px;background:#303740;display:flex}
+.pipeline-segment{height:100%;min-width:1px}
+.pipeline-segment.todo{background:#78899f}
+.pipeline-segment.in_progress{background:#d3b36a}
+.pipeline-segment.review{background:#bba0df}
+.pipeline-segment.awaiting_merge{background:#96a9e8}
+.pipeline-segment.done{background:#7bb49a}
+.overview-breakdown{padding:2px 0 5px}

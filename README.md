@@ -121,3 +121,8 @@ whenever Runner is installed or upgraded; Agent Skill is optional.
 - Existing worktrees can be explored but cannot be selected for Runner dispatch until
   the standalone T3 CLI exposes the equivalent native `existing_worktree` launch strategy.
   Runner never silently substitutes a different checkout or copies browser credentials.
+
+When Runner is installed and a T3 thread is available, **Task Editor → Explore worktrees**
+can call the built-in `inspect` adapter on the selected execution host. Without Runner,
+the panel falls back to worktree paths attached to Git refs returned by T3. Both paths
+are read-only; neither will checkout or delete a branch.

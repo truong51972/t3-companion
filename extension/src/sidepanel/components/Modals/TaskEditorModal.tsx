@@ -7,6 +7,7 @@ import {
 import type { T3GitRef } from '../../../bridge/t3-bridge';
 
 type DiscoveredModel = TaskModelSelection & { name: string; provider: string };
+type InspectedWorktree = { path: string; branch: string | null; locked?: boolean };
 
 function localDateTime(iso?: string) {
   if (!iso) return '';
@@ -16,7 +17,7 @@ function localDateTime(iso?: string) {
 }
 
 export function TaskEditorModal({
-  open, task, availableModels, discoveryScope, onExploreRefs, onExploreModels, onClose, onSave, busy,
+  open, task, availableModels, discoveryScope, onExploreRefs, onExploreModels, onExploreWorktrees, onClose, onSave, busy,
 }: {
   open: boolean;
   task: Task | null;
@@ -24,6 +25,7 @@ export function TaskEditorModal({
   discoveryScope: string;
   onExploreRefs: () => Promise<T3GitRef[]>;
   onExploreModels: () => Promise<DiscoveredModel[]>;
+  onExploreWorktrees: () => Promise<InspectedWorktree[]>;
   onClose: () => void;
   onSave: (task: Task) => Promise<void>;
   busy: boolean;
@@ -40,6 +42,9 @@ export function TaskEditorModal({
   const [modelsError, setModelsError] = useState('');
   const [explored, setExplored] = useState(false);
   const [showWorktrees, setShowWorktrees] = useState(false);
+  const [inspectedWorktrees, setInspectedWorktrees] = useState<InspectedWorktree[] | null>(null);
+  const [worktreesBusy, setWorktreesBusy] = useState(false);
+  const [worktreesError, setWorktreesError] = useState('');
   const [schedule, setSchedule] = useState('');
 
   useEffect(() => {
@@ -49,6 +54,8 @@ export function TaskEditorModal({
     setCustomModel(false);
     setModelMore(false);
     setShowWorktrees(false);
+    setInspectedWorktrees(null);
+    setWorktreesError('');
   }, [task, open]);
 
   useEffect(() => {
@@ -112,6 +119,23 @@ export function TaskEditorModal({
       ...previous,
       execution: { workspace: 'auto', ...previous.execution, ...patch },
     }));
+  }
+  async function toggleWorktreeExplorer() {
+    if (showWorktrees) {
+      setShowWorktrees(false);
+      return;
+    }
+    setShowWorktrees(true);
+    if (inspectedWorktrees !== null) return;
+    setWorktreesBusy(true);
+    setWorktreesError('');
+    try {
+      setInspectedWorktrees(await onExploreWorktrees());
+    } catch (error) {
+      setWorktreesError(String(error));
+    } finally {
+      setWorktreesBusy(false);
+    }
   }
   async function discoverModels() {
     setModelsBusy(true);
@@ -187,19 +211,29 @@ export function TaskEditorModal({
             <span className="muted">{refsBusy ? 'Loading Git refs from T3…' :
               refsError ? 'Branch discovery unavailable; enter a ref manually.' :
               refs.length ? refs.length + ' refs available' : 'No Git refs found'}</span>
-            <button type="button" className="text-action" onClick={() => setShowWorktrees(value => !value)}>
-              {showWorktrees ? 'Hide worktrees' : 'Explore worktrees'} ({knownWorktrees.length})
+            <button type="button" className="text-action"
+              onClick={() => void toggleWorktreeExplorer()}>
+              {showWorktrees ? 'Hide worktrees' : 'Explore worktrees'} ({inspectedWorktrees?.length ?? knownWorktrees.length})
             </button>
           </div>
         )}
         {showWorktrees && (
           <div className="task-discovery-panel" aria-label="Existing Git worktrees">
             <strong>Existing worktrees</strong>
-            {knownWorktrees.length ? knownWorktrees.map(item => (
-              <div key={item.worktreePath} className="task-discovery-item">
-                <span>{item.name}</span><small title={item.worktreePath || ''}>{item.worktreePath}</small>
-              </div>
-            )) : <p className="muted">No known worktrees for this project.</p>}
+            {worktreesBusy && <p className="muted">Inspecting execution host…</p>}
+            {inspectedWorktrees !== null
+              ? inspectedWorktrees.length ? inspectedWorktrees.map(item => (
+                <div key={item.path} className="task-discovery-item">
+                  <span>{item.branch || '(detached HEAD)'}{item.locked ? ' · locked' : ''}</span>
+                  <small title={item.path}>{item.path}</small>
+                </div>
+              )) : <p className="muted">No worktrees found by Runner.</p>
+              : knownWorktrees.length ? knownWorktrees.map(item => (
+                <div key={item.worktreePath} className="task-discovery-item">
+                  <span>{item.name}</span><small title={item.worktreePath || ''}>{item.worktreePath}</small>
+                </div>
+              )) : <p className="muted">No known worktrees for this project.</p>}
+            {worktreesError && <p className="muted">Runner inspection unavailable: {worktreesError}. Showing T3 refs where available.</p>}
             <p className="muted">Read-only explorer. The standalone T3 CLI cannot safely attach an existing worktree yet.</p>
           </div>
         )}

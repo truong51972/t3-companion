@@ -1168,6 +1168,18 @@ function App() {
           if (!tabId) return Promise.resolve([]);
           return exploreEnvironmentModels(tabId, environmentId);
         }}
+        onExploreWorktrees={async () => {
+          if (!tabId || !runnerHost || !runnerHostProject || !currentProject || !parsedRunner.installed)
+            throw new Error('Install and start Runner in Overview for full worktree inspection');
+          const response = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id,
+            'inspect', currentProject.workspaceRoot);
+          const parsed = JSON.parse(response) as { projectInspection?: {
+            worktrees?: Array<{ path: string; branch: string | null; locked?: boolean }>
+          } };
+          if (!Array.isArray(parsed.projectInspection?.worktrees))
+            throw new Error('Installed Runner lacks the Git adapter; update Runner in Overview');
+          return parsed.projectInspection.worktrees;
+        }}
         onClose={() => {
           setIsEditorOpen(false);
           setEditingTask(null);
