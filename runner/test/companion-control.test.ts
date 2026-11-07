@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -35,7 +35,7 @@ function fixture(t) {
       else{console.error('invalid verb');process.exitCode=1}
     `);
   };
-  return { run, installStub };
+  return { run, installStub, home };
 }
 
 test('status does not install anything and returns a stable JSON envelope', t => {
@@ -71,4 +71,15 @@ test('unknown actions fail with an explicit marker', t => {
   assert.equal(response.status, 1);
   assert.ok(response.stdout.includes('T3_COMPANION_ERROR:'));
   assert.ok(response.stdout.includes(marker + ':1'));
+});
+
+test('legacy four-file Runner remains installed and eligible for an upgrade', t => {
+  const { run, installStub, home } = fixture(t);
+  installStub();
+  const pathToWorkflow = path.join(home, '.t3', 'companion', 'runner', 'src', 'workflow.ts');
+  unlinkSync(pathToWorkflow);
+  const status = run('status');
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(status.result.installed, true);
+  assert.equal(status.result.upgradeRequired, true);
 });
