@@ -43,6 +43,7 @@ function state(extra = {}) {
 async function downloadAndInstall(force) {
   const installed = files.every(file => fs.existsSync(path.join(root, file)));
   const previous = installed ? run('status') : { running: false };
+  const previousInstall = installation();
   const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/' + SOURCE_REF,
     { headers: { 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
   if (!source.ok) throw new Error('Cannot resolve Runner release: HTTP ' + source.status);
@@ -93,7 +94,23 @@ async function downloadAndInstall(force) {
       for (const [backup, target] of backups.reverse()) await fsp.rename(backup, target);
       throw error;
     }
-    if (previous.running) run('start');
+    if (previous.running) {
+      try { run('start'); }
+      catch (restartError) {
+        // A failed restart is a failed upgrade. Restore the entire executable
+        // set and its prior version marker before attempting to restart again.
+        for (const target of written) await fsp.rm(target, { force: true });
+        for (const [backup, target] of backups.reverse()) await fsp.rename(backup, target);
+        if (previousInstall) {
+          const temp = manifest + '.' + process.pid + '.rollback';
+          await fsp.writeFile(temp, JSON.stringify(previousInstall) + '\n', { mode: 0o600 });
+          await fsp.rename(temp, manifest);
+        } else await fsp.rm(manifest, { force: true });
+        try { run('start'); }
+        catch { /* original failed update is more useful than a second error */ }
+        throw new Error('Runner update rolled back after restart failed: ' + String(restartError));
+      }
+    }
     return state({ updated: true });
   } catch (error) {
     // If the download or replacement failed after a graceful stop, restart
