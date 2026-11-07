@@ -16,7 +16,8 @@ type Task = { id: string; title: string; description?: string; prompt: string; s
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
 type Page = 'kanban' | 'overview';
-const COMPACT_BOARD_QUERY = '(max-width: 599px)';
+// Keep this threshold aligned with sidepanel.css: tiled windows under 800px use compact lanes.
+const COMPACT_BOARD_QUERY = '(max-width: 799px)';
 
 function useCompactBoard(): boolean {
   const [compact, setCompact] = useState(() => window.matchMedia(COMPACT_BOARD_QUERY).matches);
