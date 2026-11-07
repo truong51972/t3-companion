@@ -201,5 +201,7 @@ test('build pins the source commit instead of using main for PR-preview upgrades
   assert.match(config, /__T3_COMPANION_SOURCE_REF__/);
   const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
   assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
-  assert.match(controller, /commits\/\' \+ sourceRef/);
+  assert.match(controller, /let sha = sourceRef/);
+  assert.match(controller, /if \(sourceRef === 'main'\)/);
+  assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
 });
