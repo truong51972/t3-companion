@@ -51,11 +51,16 @@ async function downloadAndInstall(force, sourceRef = DEFAULT_SOURCE_REF) {
   const installed = hasCurrentRunner();
   const previous = hasLegacyRunner() ? run('status') : { running: false };
   const previousInstall = installation();
-  const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/' + sourceRef,
-    { headers: { 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
-  if (!source.ok) throw new Error('Cannot resolve Runner release: HTTP ' + source.status);
-  const sha = (await source.json()).sha;
-  if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('Invalid Runner release SHA');
+  // An immutable build SHA needs no unauthenticated GitHub API request.
+  // Resolve "main" only for distributed source archives built without .git.
+  let sha = sourceRef;
+  if (sourceRef === 'main') {
+    const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/main',
+      { headers: { 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
+    if (!source.ok) throw new Error('Cannot resolve Runner release: HTTP ' + source.status);
+    sha = (await source.json()).sha;
+    if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('Invalid Runner release SHA');
+  }
   if (!force && installed && installation()?.sha === sha) return state({ upToDate: true });
   await fsp.mkdir(root, { recursive: true });
   const staging = await fsp.mkdtemp(path.join(root, '.runner-update-'));
