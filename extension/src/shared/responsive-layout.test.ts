@@ -26,5 +26,8 @@ test('snapped-width UI preserves readable selectors, metrics and action controls
   assert.match(sidepanelCss, /\.overview-expander \.runner-toolbar>button\{[\s\S]*?min-height:34px/);
   assert.match(sidepanelCss, /@media\s*\(max-height:620px\)/);
   assert.match(sidepanelCss, /\.sidepanel \.modal\{max-height:calc\(100dvh - 12px\)\}/);
-  assert.match(popupCss, /width:min\(330px,100vw\)/);
+  // A browser-action popup is content-sized; using 100vw here caused Edge to
+  // collapse the popup to a tiny strip. Only the Side Panel is viewport-sized.
+  assert.match(popupCss, /html,\s*body,\s*#root\s*\{\s*width:\s*336px/);
+  assert.match(popupCss, /\.popup\s*\{[^}]*width:\s*336px/s);
 });
