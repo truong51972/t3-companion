@@ -122,6 +122,14 @@ export function RunnerExpander({
               </div>
             )
           )}
+          {runner.installed && (
+            <div className="service-facts" aria-label="Runner information">
+              <div><span>Execution</span><strong>{runner.running ? 'Active' : 'Stopped'}{runner.pid && runner.running ? ' · PID ' + runner.pid : ''}</strong></div>
+              <div><span>Version</span><strong>{runner.version ? runner.version.slice(0, 10) : 'Unversioned'}</strong></div>
+              <div><span>Scheduler</span><strong>{runner.scanIntervalMs ? Math.round(runner.scanIntervalMs / 1000) + 's scan' : 'Unavailable'} · {runner.maxConcurrent} workers</strong></div>
+              <div><span>Last verified</span><strong>{runnerCacheAt ? new Date(runnerCacheAt).toLocaleTimeString() + ' (cached)' : 'Current check'}</strong></div>
+            </div>
+          )}
           <div className="service-actions" aria-label="Runner controls">
             {(!runner.installed || runner.bridgeMissing) && (
               <button
@@ -144,20 +152,22 @@ export function RunnerExpander({
                   Start
                 </button>
               )}
-            {runner.running && (
-              <button
-                disabled={busy || runnerBusy || runner.stopping || !runnerHostAvailable}
-                onClick={() => void onManageRunner('stop')}
-              >
-                {runner.stopping ? 'Stopping…' : 'Stop'}
-              </button>
-            )}
             <div className="service-tools">
               <ServiceRefresh service="Runner" refreshing={runnerBusy}
                 disabled={busy || !runnerHostAvailable}
                 onRefresh={() => void onManageRunner('status')}/>
               {runner.installed && !runner.bridgeMissing && (
                 <ServiceMore service="Runner" menuRef={runnerActionsMenu}>
+                  {runner.running && (
+                    <button type="button"
+                      disabled={busy || runnerBusy || runner.stopping || !runnerHostAvailable}
+                      onClick={() => {
+                        runnerActionsMenu.current?.removeAttribute('open');
+                        void onManageRunner('stop');
+                      }}>
+                      {runner.stopping ? 'Stopping…' : 'Stop after active tasks'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy || runnerBusy || !runnerHostAvailable}

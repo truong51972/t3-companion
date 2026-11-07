@@ -47,5 +47,6 @@ test('drag grip supports keyboard reordering and status changes', () => {
   assert.match(code, /'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'/);
   assert.match(code, /await moveTask\(task, destination, beforeTaskId\)/);
   assert.match(code, /grip\?\.focus\(\)/);
-  assert.match(code, /Move to<select aria-label=\{'Move ' \+ task.title\} value=\{taskColumn\(task\)\}/);
+  assert.match(code, /className="task-details-shortcut"/);
+  assert.doesNotMatch(code, /Move to<select/);
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { handleDialogBackdrop } from '../Common';
-import type { Task, RuntimeDocument } from '../../../shared/domain-types';
+import { getTaskColumn, type Task, type RuntimeDocument } from '../../../shared/domain-types';
 
 export function TaskDetailsModal({
   task,
@@ -10,6 +10,7 @@ export function TaskDetailsModal({
   environmentThreadUrl,
   onClose,
   onEdit,
+  onDelete,
   onQueue,
   onOpenThread,
   busy,
@@ -21,6 +22,7 @@ export function TaskDetailsModal({
   environmentThreadUrl: (tabUrl: string, envId: string, threadId: string) => string | null;
   onClose: () => void;
   onEdit: (task: Task) => void;
+  onDelete: (task: Task) => void;
   onQueue: (task: Task) => void;
   onOpenThread: (threadId: string) => Promise<boolean>;
   busy: boolean;
@@ -61,7 +63,7 @@ export function TaskDetailsModal({
         <div>
           <h2>{task.title || 'Task details'}</h2>
           <p className="muted">
-            {task.status.replaceAll('_', ' ')} · Priority {task.priority || 2}
+            {getTaskColumn(task, runtime).replaceAll('_', ' ')} · Priority {task.priority || 2}
           </p>
         </div>
         <button
@@ -177,6 +179,15 @@ export function TaskDetailsModal({
         </div>
       </div>
       <div className="modal-actions">
+        <details className="task-detail-more">
+          <summary aria-label="More task actions" title="More task actions">•••</summary>
+          <div className="task-detail-menu">
+            <button className="danger-action" type="button" onClick={() => {
+              onClose();
+              onDelete(task);
+            }}>Delete task…</button>
+          </div>
+        </details>
         {linkedThreadId && activeLinkedUrl && (
           <button onClick={() => void onOpenThread(linkedThreadId)}>Open T3 thread ↗</button>
         )}

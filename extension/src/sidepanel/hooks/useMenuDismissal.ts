@@ -6,7 +6,7 @@ import { useEffect } from 'react';
  * open until the user explicitly toggles them.
  */
 export const DISMISSABLE_MENU_SELECTOR =
-  'details.connection-settings[open], details.service-more[open], details.task-more[open]';
+  'details.connection-settings[open], details.service-more[open], details.task-detail-more[open]';
 
 export function useMenuDismissal() {
   useEffect(() => {

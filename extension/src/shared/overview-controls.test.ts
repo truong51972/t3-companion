@@ -21,7 +21,7 @@ test('transient menu dismissal never closes content expanders', () => {
   const menuCode = readFileSync(new URL('../sidepanel/hooks/useMenuDismissal.ts', import.meta.url), 'utf8');
   assert.match(menuCode, /details\.connection-settings\[open\]/);
   assert.match(menuCode, /details\.service-more\[open\]/);
-  assert.match(menuCode, /details\.task-more\[open\]/);
+  assert.match(menuCode, /details\.task-detail-more\[open\]/);
   assert.doesNotMatch(menuCode, /querySelectorAll<HTMLDetailsElement>\('details\[open\]'\)/);
   assert.match(menuCode, /DISMISSABLE_MENU_SELECTOR/);
   assert.doesNotMatch(menuCode, /details\.overview-expander\[open\]/);

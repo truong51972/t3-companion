@@ -746,6 +746,20 @@ function App() {
     );
   }
 
+  function requestDeleteTask(task: Task) {
+    setConfirmation({
+      title: 'Delete task?',
+      description: 'This removes the task from Companion Board. It does not delete T3 threads or Git worktrees.',
+      confirmLabel: 'Delete task',
+      dangerous: true,
+      run: async () => mutateTask(
+        task.id,
+        d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }),
+        task
+      ),
+    });
+  }
+
   async function enqueue(task: Task) {
     if (parsedRunner.installed && !parsedRunner.bridgeMissing && runnerHostAvailable)
       await manageRunner('add');
@@ -1050,21 +1064,7 @@ function App() {
             setEditingTask(task);
             setIsEditorOpen(true);
           }}
-          onDeleteTask={task => {
-            setConfirmation({
-              title: 'Delete task?',
-              description:
-                'This removes the task from Companion Board. It does not delete T3 threads or Git worktrees.',
-              confirmLabel: 'Delete task',
-              dangerous: true,
-              run: async () =>
-                mutateTask(
-                  task.id,
-                  d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }),
-                  task
-                ),
-            });
-          }}
+          onDeleteTask={requestDeleteTask}
           onMoveTask={(task, status) => void action(() => moveTask(task, status))}
           keyboardMoveTask={(event, task) =>
             keyboardMoveTask(event, task, t => getTaskColumn(t, runtime))
@@ -1149,6 +1149,7 @@ function App() {
           setIsEditorOpen(true);
         }}
         onQueue={task => void action(() => enqueue(task))}
+        onDelete={requestDeleteTask}
         onOpenThread={openLinkedThread}
         busy={busy}
       />

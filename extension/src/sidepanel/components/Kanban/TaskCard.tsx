@@ -134,46 +134,12 @@ export function TaskCard({
         >
           Run / Queue
         </button>
-        <details className="task-more">
-          <summary aria-label={'More actions for ' + task.title} title="More actions">
-            •••
-          </summary>
-          <div className="task-menu">
-            <label>Move to<select aria-label={'Move ' + task.title} value={taskColumn(task)}
-                onChange={e => {
-                  e.currentTarget.closest('details')?.removeAttribute('open');
-                  const status = e.target.value as TaskStatus;
-                  onMoveTask(task, status);
-                }}
-              >
-                {BOARD_COLUMNS.map(c => (
-                  <option key={c.key} value={c.key}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="menu-actions">
-              <button
-                onClick={event => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
-                  onEditTask(task);
-                }}
-              >
-                Edit
-              </button>
-              <button
-                className="danger"
-                onClick={event => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
-                  onDeleteTask(task);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </details>
+        <button type="button" className="task-details-shortcut"
+          aria-label={'View details for ' + task.title}
+          title="View task details"
+          onClick={() => onOpenTask(task)}>
+          •••
+        </button>
       </div>
     </article>
   );

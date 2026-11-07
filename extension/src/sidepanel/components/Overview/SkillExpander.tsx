@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Chevron, ServiceRefresh, ServiceMore } from '../Common';
+import { SKILL_PATH } from '../../../shared/skill-shell';
 
 export type SkillState = 'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error';
 
@@ -58,6 +59,12 @@ export function SkillExpander({
         </span>
       </summary>
       <div className="overview-expander-body">
+        <div className="service-facts" aria-label="Agent Skill information">
+          <div><span>Scope</span><strong>Selected project</strong></div>
+          <div><span>Location</span><strong title={currentProjectRoot ? currentProjectRoot + '/' + SKILL_PATH : undefined}>{SKILL_PATH}</strong></div>
+          <div><span>Commands</span><strong>List · Show · Add · Set · Queue · Remove</strong></div>
+          <div><span>Last verified</span><strong>{skillCacheAt ? new Date(skillCacheAt).toLocaleTimeString() + ' (cached)' : skillState === 'checking' ? 'Checking…' : 'Current check'}</strong></div>
+        </div>
         {skillError && (
           <p className="runner-error" role="alert">
             {skillError}

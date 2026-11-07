@@ -64,6 +64,18 @@ export function OverviewView({
     tasks.tasks.flatMap(task => (task.executionRequests || []).map(r => r.requestId))
   );
 
+  const attentionTasks = tasks.tasks.filter(task => {
+    const latest = task.executionRequests?.at(-1);
+    const entry = latest ? runtime.requests[latest.requestId] : undefined;
+    return entry && ['blocked', 'failed', 'needs_reconciliation'].includes(entry.status);
+  });
+  const recent = tasks.tasks.flatMap(task => (task.executionRequests || []).map(request => ({
+    task,
+    request,
+    entry: runtime.requests[request.requestId],
+  }))).filter(item => item.entry?.startedAt || item.entry?.finishedAt)
+    .sort((a, b) => (b.entry?.startedAt || '').localeCompare(a.entry?.startedAt || '')).slice(0, 5);
+
   const metrics = [
     { label: 'Tasks', value: tasks.tasks.length },
     {
@@ -133,6 +145,34 @@ export function OverviewView({
             );
           })}
         </div>
+        {(attentionTasks.length > 0 || recent.length > 0) && (
+          <div className="overview-activity">
+            {attentionTasks.length > 0 && (
+              <section className="activity-panel">
+                <h3>Needs attention <span>{attentionTasks.length}</span></h3>
+                {attentionTasks.slice(0, 4).map(task => (
+                  <div className="activity-row" key={task.id}>
+                    <span className="activity-dot alert" />
+                    <strong title={task.title}>{task.title}</strong>
+                    <span>{runtime.requests[task.executionRequests!.at(-1)!.requestId]?.status.replaceAll('_', ' ')}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+            {recent.length > 0 && (
+              <section className="activity-panel">
+                <h3>Recent executions <span>{recent.length}</span></h3>
+                {recent.map(item => (
+                  <div className="activity-row" key={item.request.requestId}>
+                    <span className="activity-dot" />
+                    <strong title={item.task.title}>{item.task.title}</strong>
+                    <span>{item.entry?.workflowStage?.replaceAll('_', ' ') || item.entry?.status?.replaceAll('_', ' ')}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+          </div>
+        )}
         <RunnerExpander
           runner={runner}
           runnerHostAvailable={runnerHostAvailable}
