@@ -151,10 +151,10 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             if (await fs.stat(stopFile(home)).then(() => true, () => false)) { stopping = true; break; }
             if (runtime.requests[request.requestId]) continue;
             if (request.notBefore && (Number.isNaN(Date.parse(request.notBefore)) || Date.parse(request.notBefore) > Date.now())) continue;
-            let sharedCheckout = !request.worktree && request.workspace !== 'worktree';
-            if (request.workspace === 'auto') {
-              sharedCheckout = gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true';
-            }
+            const sharedCheckout = request.workspace === 'root' ? true
+              : request.workspace === 'auto' ? gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true'
+              : request.workspace === 'worktree' ? false
+              : !request.worktree; // legacy behavior
             if (sharedCheckout && nonWorktreeProjects.has(project)) continue;
             const id = `${project}:${request.requestId}`;
             const claimed = await updateRuntime(project, current => {
