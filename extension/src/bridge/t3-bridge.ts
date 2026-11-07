@@ -174,12 +174,12 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
 export function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   verb: RunnerVerb, target?: string): Promise<string> {
   return terminalCommand(tabId, environmentId, project, hostThreadId,
-    marker => runnerShellCommand(verb, target, marker), verb === 'install' ? 90000 : verb === 'status' ? 18000 : 38000);
+    marker => runnerShellCommand(verb, target, marker), ['install', 'update', 'reinstall'].includes(verb) ? 150000 : verb === 'status' ? 18000 : 38000);
 }
 
 /** The installer uses npx skills add with the selected project's cwd; no automatic install. */
 export function installProjectSkill(tabId: number, environmentId: string, project: Project, hostThreadId: string,
-  targetProjectRoot: string): Promise<string> {
+  targetProjectRoot: string, action: 'install' | 'update' | 'reinstall' = 'install'): Promise<string> {
   return terminalCommand(tabId, environmentId, project, hostThreadId,
-    marker => skillInstallShellCommand(targetProjectRoot, marker), 105000);
+    marker => skillInstallShellCommand(targetProjectRoot, marker, action), 105000);
 }
