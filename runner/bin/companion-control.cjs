@@ -23,8 +23,8 @@ const files = [
 const REPOSITORY = 'truong51972/t3-companion';
 const SOURCE_REF = 'main';
 
-function run(command, arg) {
-  const child = spawnSync(process.execPath, [entry, command, ...(arg === undefined ? [] : [arg])], {
+function run(command, ...args) {
+  const child = spawnSync(process.execPath, [entry, command, ...args], {
     encoding: 'utf8', timeout: 10000, windowsHide: true, maxBuffer: 1024 * 1024,
   });
   if (child.error || child.status !== 0)
@@ -127,7 +127,7 @@ async function downloadAndInstall(force) {
 
 async function main() {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid completion marker');
-  if (!['install','update','reinstall','status','start','stop','add','remove'].includes(verb))
+  if (!['install','update','reinstall','status','start','stop','add','remove','configure'].includes(verb))
     throw new Error('Unknown Runner operation');
   if (verb === 'install' || verb === 'update' || verb === 'reinstall') {
     const result = await downloadAndInstall(verb === 'reinstall' || verb === 'install');
@@ -149,6 +149,13 @@ async function main() {
   if (verb === 'stop') {
     const response = run('stop');
     return state({ stopRequested: response.requested });
+  }
+  if (verb === 'configure') {
+    if (!encodedTarget || !/^[A-Za-z0-9_-]{1,16}$/.test(encodedTarget)) throw new Error('Invalid Runner setting');
+    const value = Buffer.from(encodedTarget, 'base64url').toString('utf8');
+    if (!/^[1-3]$/.test(value)) throw new Error('Max concurrent must be 1..3');
+    run('config', 'set', value);
+    return state();
   }
   if (verb === 'add' || verb === 'remove') {
     if (!encodedTarget || !/^[A-Za-z0-9_-]+$/.test(encodedTarget)) throw new Error('Project path required');
