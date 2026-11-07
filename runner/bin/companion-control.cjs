@@ -18,9 +18,10 @@ const files = [
   'runner/src/runner.ts',
   'runner/src/storage.ts',
   'runner/src/workflow.ts',
+  'runner/src/t3-cli.ts',
 ];
 // Release channel: resolve main to one immutable SHA before fetching all files.
-const coreFiles = files.filter(file => file !== 'runner/src/workflow.ts');
+const coreFiles = files.filter(file => file !== 'runner/src/workflow.ts' && file !== 'runner/src/t3-cli.ts');
 const fileExists = file => fs.existsSync(path.join(root, file));
 const hasLegacyRunner = () => coreFiles.every(fileExists);
 const hasCurrentRunner = () => files.every(fileExists);
