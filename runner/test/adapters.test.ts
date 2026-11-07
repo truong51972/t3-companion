@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,9 +27,10 @@ test('built-in Git adapter lists refs and all worktrees without executing a shel
   const result = await inspectGitProject(project);
   assert.equal(result.isGit, true);
   assert.ok(result.refs.includes('feature/testing'));
-  assert.ok(result.worktrees.some(item => path.normalize(item.path).toLowerCase() === path.normalize(linked).toLowerCase() && item.branch === 'worktree-testing'),
+  const canonical = (value: string) => realpathSync.native(value).toLowerCase();
+  assert.ok(result.worktrees.some(item => canonical(item.path) === canonical(linked) && item.branch === 'worktree-testing'),
     JSON.stringify({ linked, worktrees: result.worktrees }));
-  assert.ok(result.worktrees.some(item => path.normalize(item.path).toLowerCase() === path.normalize(project).toLowerCase()));
+  assert.ok(result.worktrees.some(item => canonical(item.path) === canonical(project)));
   assert.equal(RUNNER_CAPABILITIES.existingWorktreeDispatch, false);
 });
 
