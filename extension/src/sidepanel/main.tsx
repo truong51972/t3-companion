@@ -114,6 +114,7 @@ function App() {
   const editorDialog = useRef<HTMLDialogElement>(null);
   const queueDialog = useRef<HTMLDialogElement>(null);
   const detailsDialog = useRef<HTMLDialogElement>(null);
+  const clearDialog = useRef<HTMLDialogElement>(null);
   const runnerProjectsMenu = useRef<HTMLDetailsElement>(null);
   const filesVersion = useRef(0);
   const shellVersion = useRef(0);
@@ -178,6 +179,7 @@ function App() {
     }).catch(() => {});
     return () => { live = false; };
   }, [environmentId, currentProject?.workspaceRoot]);
+  useEffect(() => { const dialog = clearDialog.current; if (!dialog) return; if (confirmClear && !dialog.open) dialog.showModal(); else if (!confirmClear && dialog.open) dialog.close(); }, [confirmClear]);
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
@@ -509,6 +511,14 @@ function App() {
   const taskExecution = (task: Task) => {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
   };
+  const taskColumn = (task: Task): Status => {
+    if (task.status === 'done' || task.status === 'review') return task.status;
+    const status = taskExecution(task)?.status;
+    if (status === 'dispatching') return 'in_progress';
+    if (status === 'completed' || status === 'blocked' || status === 'failed' || status === 'needs_reconciliation')
+      return 'review';
+    return task.status;
+  };
   const taskRequests = (task: Task) => [...(task.executionRequests || [])].reverse().map(request => ({
     request,
     execution: runtime.requests[request.requestId],
@@ -552,6 +562,13 @@ function App() {
     setDragTaskId(null); setDragTarget(null);
     const task = tasks.tasks.find(item => item.id === taskId);
     if (task) void action(() => moveTask(task, status, beforeTaskId));
+  }
+  async function clearBrowserData() {
+    // Chrome extension storage is isolated from T3's site cookies and project files.
+    // Clear both durable preferences/caches and ephemeral last-tab selection.
+    await Promise.all([chrome.storage.local.clear(), chrome.storage.session.clear()]);
+    setConfirmClear(false);
+    window.location.reload();
   }
   async function manageRunner(verb: 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
     if (!tabId || !currentProject) return;
@@ -655,7 +672,7 @@ function App() {
       ) : (
       <div className="board-scroll">
         <div className="board">{columns.map(column => {
-          const laneTasks = tasks.tasks.filter(t => t.status === column.key);
+          const laneTasks = tasks.tasks.filter(t => taskColumn(t) === column.key);
           const expanded = !compactBoard || (laneTasks.length > 0 && expandedLanes[column.key]);
           const laneHeading = <>
             <div className="lane-title">
@@ -815,7 +832,7 @@ function App() {
         </div>
         <div className="overview-breakdown" aria-label="Task status breakdown">
           {columns.map(column => {
-            const count = tasks.tasks.filter(task => task.status === column.key).length;
+            const count = tasks.tasks.filter(task => taskColumn(task) === column.key).length;
             return <div className="overview-breakdown-item" key={column.key}>
               <span className={'lane-icon ' + column.key}/><span>{column.name}</span><strong>{count}</strong>
             </div>;
@@ -824,12 +841,13 @@ function App() {
         <details className="overview-expander" open>
           <summary><span className="overview-expander-title">Runner</span>
             <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')}
-              title={runnerError || undefined}>{runnerState}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
+              title={runnerError || undefined}>{runnerState}{runnerCacheAt ? ' · Cached' : ''}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
           </summary>
           <div className="overview-expander-body">
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
+        {runnerInstalled === 'true' && <p className="runner-hint">Version: {runnerVersion ? runnerVersion.slice(0, 10) : 'Legacy · not recorded'}{runnerCacheAt ? ' · Last verified ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>}
         <div className="runner-toolbar">
           {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('install'))}>{runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up Runner controls' : 'Install & Start'}</button>}
@@ -837,6 +855,11 @@ function App() {
             disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
           {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
+          {runnerInstalled === 'true' && !runnerBridgeMissing && <>
+            <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('update'))}>Update</button>
+            <button disabled={busy || !runnerHostAvailable}
+              onClick={() => { if (window.confirm('Re-install Runner files? Existing tasks, registry and runtime history will be preserved.')) void action(async () => manageRunner('reinstall')); }}>Re-install</button>
+          </>}
           {runnerInstalled === 'true' && <details ref={runnerProjectsMenu} className="runner-more">
             <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
             <div className="runner-menu">
@@ -871,19 +894,43 @@ function App() {
             </span>
           </summary>
           <div className="overview-expander-body">
-            <p className="overview-description">Allow agents to manage .t3/tasks.json using bundled scripts instead of editing JSON manually.</p>
+            <p className="overview-description">Manage project tasks using the installed agent skill. Installation is scoped to this project.</p>
+            {skillCacheAt && <p className="runner-hint">Cached · Last verified {new Date(skillCacheAt).toLocaleTimeString()}</p>}
             {skillError && <p className="runner-error" role="alert">{skillError}</p>}
             <div className="runner-toolbar">
               {skillState !== 'installed' && <button className="primary" disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
                 onClick={() => void action(async () => manageSkill('install'))}>{skillBusy ? 'Installing…' : 'Install Skill'}</button>}
+              {skillState === 'installed' && <>
+                <button disabled={busy || skillBusy || !runnerHostAvailable} onClick={() => void action(async () => manageSkill('update'))}>Update</button>
+                <button disabled={busy || skillBusy || !runnerHostAvailable}
+                  onClick={() => { if (window.confirm('Re-install Agent Skill in this project? Existing tasks will be preserved.')) void action(async () => manageSkill('reinstall')); }}>Re-install</button>
+              </>}
               <button type="button" disabled={busy || skillBusy} onClick={() => void action(async () => manageSkill('status'))}>Refresh</button>
             </div>
             <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
             <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
           </div>
         </details>
+        <details className="overview-expander data-settings">
+          <summary><span className="overview-expander-title">Browser Data</span><span className="muted">Preferences & cache</span></summary>
+          <div className="overview-expander-body">
+            <p className="overview-description">Reset Companion's browser preferences, selected environments/projects and cached Runner/Skill statuses. Tasks, worktrees and T3 sign-in are not affected.</p>
+            <div className="runner-toolbar"><button className="danger-action" onClick={() => setConfirmClear(true)}>Clear browser data…</button></div>
+          </div>
+        </details>
       </div>
     </section>}
+    <dialog ref={clearDialog} className="modal confirm-dialog" aria-label="Clear browser data"
+      onCancel={() => setConfirmClear(false)} onClose={() => setConfirmClear(false)}
+      onClick={event => onDialogBackdrop(event, () => setConfirmClear(false))}>
+      <div className="modal-heading"><div><h2>Clear Companion browser data?</h2><p className="muted">This cannot be undone.</p></div>
+        <button className="icon-button" aria-label="Close confirmation" onClick={() => setConfirmClear(false)}>×</button></div>
+      <div className="modal-content"><p className="modal-intro">This removes saved UI preferences, environment/project selections, recognized host list and cached statuses. It does not delete project files, Runner, Agent Skill, T3 threads or T3 cookies.</p></div>
+      <div className="modal-actions">
+        <button onClick={() => setConfirmClear(false)}>Cancel</button>
+        <button className="danger-action" disabled={busy} onClick={() => void action(clearBrowserData)}>Clear data</button>
+      </div>
+    </dialog>
     <dialog ref={detailsDialog} className="modal task-details-dialog" aria-label="Task details" onCancel={() => setDetailsTaskId(null)}
       onClick={event => onDialogBackdrop(event, () => setDetailsTaskId(null))} onClose={() => setDetailsTaskId(null)}>
       <div className="modal-heading">
