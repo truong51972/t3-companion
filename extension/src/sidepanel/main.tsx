@@ -741,8 +741,12 @@ function App() {
       }
       move.preventDefault();
       const hint = pointerDropHint(move.clientX, move.clientY);
-      setDropHint(hint);
-      setDragTarget(current => current === (hint?.lane || null) ? current : hint?.lane as Status || null);
+      setDropHint(current => current?.lane === hint?.lane &&
+        current?.hoveredTaskId === hint?.hoveredTaskId &&
+        current?.beforeTaskId === hint?.beforeTaskId &&
+        current?.edge === hint?.edge ? current : hint);
+      const targetStatus = (hint?.lane || null) as Status | null;
+      setDragTarget(current => current === targetStatus ? current : targetStatus);
       setDragPreview({ title: task.title, x: move.clientX, y: move.clientY });
 
       // Auto-scroll for both compact one-scroll boards and wide, independently
