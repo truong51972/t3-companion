@@ -114,6 +114,7 @@ async function main() {
     if (opt.priority !== undefined) task.priority = priority(opt.priority);
     if (opt.status !== undefined) {
       if (!statuses.has(opt.status)) throw new Error('Invalid status: ' + opt.status);
+      if (opt.status === 'done') throw new Error('Done is reserved for verified merged PR/MR or a manual Board move');
       task.status = opt.status;
       task.statusOverride = true;
     }
