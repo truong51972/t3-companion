@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const statuses = new Set(['todo', 'in_progress', 'review', 'done']);
+const statuses = new Set(['todo', 'in_progress', 'review', 'awaiting_merge', 'done']);
 const commands = new Set(['list', 'show', 'add', 'set', 'queue', 'remove']);
 const [command, ...args] = process.argv.slice(2);
 const usage = 'Usage: tasks.mjs <list|show|add|set|queue|remove> [--project path] [--id id] [--title text] [--prompt text] [--description text] [--priority 1..3] [--status status] [--workspace auto|root|worktree] [--worktree base-ref] [--not-before ISO-8601]';
