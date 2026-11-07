@@ -27,11 +27,8 @@ export interface TaskExecutionSettings {
 }
 
 export interface ExecutionRequest {
-  execution?: TaskExecutionSettings;
   requestId: string;
-  notBefore?: string;
-  worktree?: string;
-  workspace?: WorkspaceMode;
+  execution: TaskExecutionSettings;
 }
 
 export interface Task {
@@ -56,7 +53,6 @@ export interface RuntimeRecord {
   status: string;
   threadId?: string | null;
   runId?: string | null;
-  reply?: string | null;
   error?: string | null;
   startedAt?: string;
   finishedAt?: string;
@@ -122,7 +118,7 @@ export function validateTasks(data: unknown): TasksDocument {
         (t.executionRequests === undefined || (Array.isArray(t.executionRequests) &&
           t.executionRequests.every((r: ExecutionRequest) =>
             r && typeof r.requestId === 'string' &&
-            (r.execution === undefined || validExecutionSettings(r.execution))))) &&
+            validExecutionSettings(r.execution)))) &&
         BOARD_COLUMNS.some(c => c.key === t.status)
     )
   ) {
@@ -171,7 +167,6 @@ export interface ParsedRunnerState {
   installed: boolean;
   running: boolean;
   pid: number | null;
-  bridgeMissing: boolean;
   starting: boolean;
   stopping: boolean;
   error: string;
@@ -186,7 +181,7 @@ export interface ParsedRunnerState {
   lastScanAt: string | null;
   activeExecutions: number | null;
   scanErrors: number | null;
-  label: 'Needs session' | 'Error' | 'Setup required' | 'Starting' | 'Not installed' | 'CLI unavailable' | 'Stopping' | 'Running' | 'Stopped' | 'Checking';
+  label: 'Needs session' | 'Error' | 'Starting' | 'Not installed' | 'CLI unavailable' | 'Stopping' | 'Running' | 'Stopped' | 'Checking';
 }
 
 export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRunnerState {
@@ -205,17 +200,15 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
 
   const running = parsed?.running === true;
   const installed = parsed?.installed === true;
-  const bridgeMissing = parsed?.bridgeMissing === true;
   const starting = parsed?.starting === true;
   const stopRequested = parsed?.stopRequested === true;
   const stopping = stopRequested && running;
   const pid = typeof parsed?.pid === 'number' ? parsed.pid : null;
   const version = typeof parsed?.version === 'string' ? parsed.version : null;
-  // Runner CLI reports { settings: { maxConcurrent, scanIntervalMs } }.
-  // Top-level values are accepted only for backward compatibility.
+  // Runner CLI reports scheduler settings within the settings envelope.
   const settings = parsed?.settings && typeof parsed.settings === 'object' &&
     !Array.isArray(parsed.settings) ? parsed.settings as Record<string, unknown> : null;
-  const rawInterval = settings?.scanIntervalMs ?? parsed?.scanIntervalMs;
+  const rawInterval = settings?.scanIntervalMs;
   const scanIntervalMs = typeof rawInterval === 'number' && Number.isInteger(rawInterval) &&
     rawInterval >= 1000 && rawInterval <= 60000 ? rawInterval : null;
   const upgradeRequired = parsed?.upgradeRequired === true;
@@ -225,7 +218,7 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
   const cliAvailable = cliObj ? cliObj.available !== false : true;
   const cliCommand = typeof cliObj?.command === 'string' ? cliObj.command : null;
 
-  const rawConcurrent = settings?.maxConcurrent ?? parsed?.maxConcurrent;
+  const rawConcurrent = settings?.maxConcurrent;
   const maxConcurrent = typeof rawConcurrent === 'number' && Number.isInteger(rawConcurrent) &&
     rawConcurrent >= 1 && rawConcurrent <= 3 ? rawConcurrent : 3;
   const rawProjects = parsed?.registeredProjects;
@@ -242,8 +235,6 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
     label = 'Needs session';
   } else if (errorMsg) {
     label = 'Error';
-  } else if (bridgeMissing && installed) {
-    label = 'Setup required';
   } else if (starting) {
     label = 'Starting';
   } else if (!installed && raw !== 'Not checked') {
@@ -265,7 +256,6 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
     installed,
     running,
     pid,
-    bridgeMissing,
     starting,
     stopping,
     error: errorMsg,

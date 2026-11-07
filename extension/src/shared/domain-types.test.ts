@@ -7,8 +7,7 @@ test('parseRunnerState handles uninstalled and running states without regex', ()
     running: false,
     installed: true,
     pid: null,
-    maxConcurrent: 2,
-    scanIntervalMs: 10000,
+    settings: { maxConcurrent: 2, scanIntervalMs: 10000 },
     cli: { available: true, command: '/usr/local/bin/t3' },
   });
   const state = parseRunnerState(stoppedJson, true);
@@ -44,7 +43,7 @@ test('parseRunnerState accepts actual Runner CLI status envelope with nested set
   const actualStatus = JSON.stringify({
     running: true,
     pid: 8412,
-    home: '/home/test/.t3/runner',
+    home: '/home/test/t3-companion/.data/runner',
     settings: { maxConcurrent: 2, scanIntervalMs: 15000 },
     cli: { available: true, command: '/home/test/.local/bin/t3', source: 'local-install' },
     installed: true,
@@ -59,14 +58,12 @@ test('parseRunnerState accepts actual Runner CLI status envelope with nested set
   assert.equal(state.upgradeRequired, false);
 });
 
-test('nested settings take precedence over stale flat values, malformed values fail closed', () => {
-  const valid = parseRunnerState(JSON.stringify({
-    installed: true, running: false,
-    maxConcurrent: 3, scanIntervalMs: 10000,
-    settings: { maxConcurrent: 1, scanIntervalMs: 20000 },
+test('top-level legacy scheduler settings are ignored', () => {
+  const obsolete = parseRunnerState(JSON.stringify({
+    installed: true, running: false, maxConcurrent: 1, scanIntervalMs: 20000,
   }), true);
-  assert.equal(valid.maxConcurrent, 1);
-  assert.equal(valid.scanIntervalMs, 20000);
+  assert.equal(obsolete.maxConcurrent, 3);
+  assert.equal(obsolete.scanIntervalMs, null);
 
   const invalid = parseRunnerState(JSON.stringify({
     installed: true, running: false,
@@ -82,7 +79,7 @@ test('getTaskColumn projects status correctly from runtime record and manual ove
     title: 'Test',
     prompt: 'Do something',
     status: 'todo',
-    executionRequests: [{ requestId: 'req-1' }],
+    executionRequests: [{ requestId: 'req-1', execution: { workspace: 'auto' } }],
   };
 
   const runtime: RuntimeDocument = {
@@ -137,4 +134,6 @@ test('task execution settings validate and remain separate from queued snapshots
   assert.throws(() => validateTasks({ ...configured,
     tasks: [{ ...configured.tasks[0], executionRequests: [{ requestId: 'run-2',
       execution: { workspace: 'worktree', modelSelection: { instanceId: '', model: 'gpt' } } }] }] }));
+  assert.throws(() => validateTasks({ ...configured,
+    tasks: [{ ...configured.tasks[0], executionRequests: [{ requestId: 'old-request' }] }] }));
 });

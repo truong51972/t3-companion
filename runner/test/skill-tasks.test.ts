@@ -34,7 +34,7 @@ test('skill stores execution settings on tasks and snapshots them only on queue'
   assert.equal(second.status, 0, second.stderr);
   assert.equal(first.value.execution.baseRef, 'origin/main', 'an earlier queue keeps its snapshot');
   assert.equal(second.value.execution.baseRef, 'release');
-  assert.equal(first.value.notBefore, '2026-12-01T02:00:00.000Z');
+  assert.equal(first.value.execution.notBefore, '2026-12-01T02:00:00.000Z');
   assert.notEqual(first.value.requestId, second.value.requestId);
   assert.notEqual(run('queue', '--id', added.value.id, '--workspace', 'root').status, 0,
     'queue is not a second execution configuration editor');

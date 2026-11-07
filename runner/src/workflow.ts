@@ -41,13 +41,6 @@ export function projectThreadInspection(payload: unknown): ThreadInspection | nu
         requests.push({ url: pr.url, state });
     }
   }
-  // The legacy single link has no verified merge state; it can keep review
-  // pending, but it can never constitute proof of merge.
-  if (requests.length === 0) {
-    const link = record(thread.linkedPullRequest);
-    if (typeof link?.url === 'string' && /^https:\/\//.test(link.url))
-      requests.push({ url: link.url, state: 'unknown' });
-  }
   if (count > 0) return { stage: 'human_review', pendingRequestCount: count, changeRequests: requests };
   const status = thread.status;
   if (status === 'running' || status === 'pending' || status === 'queued' || status === 'starting') {

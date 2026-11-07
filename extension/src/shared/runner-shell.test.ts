@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readableTerminalText, runnerShellCommand, terminalSubmit,
@@ -63,45 +63,9 @@ test('uninstalled status is read-only and reports no Runner', () => {
     const marker = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
     assert.ok(marker, child.stdout);
     assert.deepEqual(JSON.parse(marker[1]), {
-      installed: false, running: false, pid: null, version: null, bridgeMissing: false, upgradeRequired: false,
+      installed: false, running: false, pid: null, version: null, upgradeRequired: false,
     });
     assert.ok(child.stdout.includes(MARKER + ':0'));
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
-
-test('legacy file-copy install is recognized for a one-time Git migration', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-'));
-  try {
-    const legacy = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
-    mkdirSync(path.dirname(legacy), { recursive: true });
-    writeFileSync(legacy, '');
-    const command = runnerShellCommand('status', undefined, MARKER);
-    const source = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
-      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
-    assert.equal(child.status, 0, child.stderr);
-    assert.match(child.stdout, /"installed":true/);
-    assert.match(child.stdout, /"bridgeMissing":true/);
-    assert.match(child.stdout, /"upgradeRequired":true/);
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
-
-test('previous Git checkout is detected for migration to ~/t3-companion', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-old-git-'));
-  try {
-    const oldEntry = path.join(home, '.t3', 't3-companion', 'runner', 'bin', 't3-runner.mjs');
-    mkdirSync(path.dirname(oldEntry), { recursive: true });
-    writeFileSync(oldEntry, '// old executable');
-    const command = runnerShellCommand('status', undefined, MARKER);
-    const source = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
-      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
-    assert.equal(child.status, 0, child.stderr);
-    const result = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
-    assert.ok(result, child.stdout);
-    assert.equal(JSON.parse(result[1]).bridgeMissing, true);
-    assert.equal(JSON.parse(result[1]).upgradeRequired, true);
-    assert.equal(JSON.parse(result[1]).installed, true);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

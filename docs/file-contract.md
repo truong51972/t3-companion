@@ -4,7 +4,7 @@ The Board and optional project Agent Skill can edit task definitions; the Runner
 
 ## Registry — `~/t3-companion/.data/runner/projects.json`
 
-`{"projects":["/absolute/project/path"]}`. No per-project registry files. `T3_COMPANION_HOME` explicitly overrides the default Companion runtime home. `T3CODE_HOME` is read only to locate the previous runtime directory during migration.
+`{"projects":["/absolute/project/path"]}`. No per-project registry files. `T3_COMPANION_HOME` explicitly overrides the default Companion runtime home.
 
 ## Tasks — `project/.t3/tasks.json`
 
@@ -20,7 +20,7 @@ The Board and optional project Agent Skill can edit task definitions; the Runner
 }
 ```
 
-Task title and agent prompt are distinct; Runner sends the prompt as stdin and the task title through T3's `--title` argument. `status` is independent of execution: `todo | in_progress | review | awaiting_merge | done`. The five visible lanes are **To Do**, **In Progress**, **Human Review**, **Awaiting Merge**, and **Done**. Runner uses `t3 thread show --json` to inspect the thread's server-owned `pendingRequestCount` and linked PR/MR states, without extracting or interpreting chat text. Any pending input goes to Human Review. A finished thread with an open or not-yet-verified linked PR/MR goes to Awaiting Merge. A finished thread with **all** linked requests verifiably merged goes to Done. No linked PR or a closed-unmerged PR/MR stays in Human Review; linked PR/MR with unknown merge state stays Awaiting Merge (unverified), never Done. `statusOverride: true` preserves a user's manual lane move until the next queue request, which resets the override. Runner never edits `tasks.json`. New tasks may store `execution` with `workspace` (`auto|worktree|root`), optional `baseRef`, optional `branch`, optional `modelSelection: {instanceId, model}`, and optional `notBefore`. Task Editor owns these settings; **Run / Queue** copies the entire configuration into `executionRequests[].execution`, with the `notBefore` timestamp also at request level for the scheduler. Runner executes the frozen snapshot, not the current task settings. Legacy requests without an execution snapshot retain their original root/worktree behavior. T3 CLI supports provider/model, title, new worktree base and branch; it cannot override reasoning effort/access or bind an existing worktree yet. Each request ID must be unique. A task can accumulate execution requests; append a new `requestId` for an intentional rerun. `notBefore` is an optional ISO 8601 timestamp. `workspace` is `auto | worktree | root`: auto creates isolated T3 worktrees for Git projects (based on their current branch), falling back to serial root execution for non-Git projects. `worktree` optionally selects a base ref. Old requests without `workspace` preserve their original root/worktree semantics. No shell commands are allowed.
+Task title and agent prompt are distinct; Runner sends the prompt as stdin and the task title through T3's `--title` argument. `status` is independent of execution: `todo | in_progress | review | awaiting_merge | done`. The five visible lanes are **To Do**, **In Progress**, **Human Review**, **Awaiting Merge**, and **Done**. Runner uses `t3 thread show --json` to inspect the thread's server-owned `pendingRequestCount` and linked PR/MR states, without extracting or interpreting chat text. Any pending input goes to Human Review. A finished thread with an open or not-yet-verified linked PR/MR goes to Awaiting Merge. A finished thread with **all** linked requests verifiably merged goes to Done. No linked PR or a closed-unmerged PR/MR stays in Human Review; linked PR/MR with unknown merge state stays Awaiting Merge (unverified), never Done. `statusOverride: true` preserves a user's manual lane move until the next queue request, which resets the override. Runner never edits `tasks.json`. New tasks may store `execution` with `workspace` (`auto|worktree|root`), optional `baseRef`, optional `branch`, optional `modelSelection: {instanceId, model}`, and optional `notBefore`. Task Editor owns these settings; **Run / Queue** copies the entire configuration into `executionRequests[].execution`, with `notBefore` stored only inside that snapshot. Runner executes the frozen snapshot, not the current task settings. T3 CLI supports provider/model, title, new worktree base and branch; it cannot override reasoning effort/access or bind an existing worktree yet. Each request ID must be unique. A task can accumulate execution requests; append a new `requestId` for an intentional rerun. `notBefore` is an optional ISO 8601 timestamp. `workspace` is `auto | worktree | root`: auto creates isolated T3 worktrees for Git projects (based on their current branch), falling back to serial root execution for non-Git projects. `baseRef` optionally selects a base ref. Requests must carry a valid `execution` snapshot. No shell commands are allowed.
 
 ## Runtime — `project/.t3/runtime.json`
 
@@ -36,7 +36,7 @@ Task title and agent prompt are distinct; Runner sends the prompt as stdin and t
 }
 ```
 
-Runtime statuses: `dispatching | completed | blocked | failed | needs_reconciliation`. Runner stores execution metadata (including thread/run IDs, bounded PR/MR snapshots, pending input count and errors), **not the full agent reply**, to keep the frequently-read runtime document small; full output remains available in the T3 thread. Legacy records may still contain a `reply` field. Runner persists `dispatching` **before** calling T3. On restart, it transitions stranded `dispatching` requests to `needs_reconciliation` and does not automatically relaunch them because the T3 thread might still be running. The first implementation uses `t3 thread start --wait --json`, so the T3 thread ID is recorded once the CLI returns; for a crash during launch, reconciliation requires inspecting T3 before manual retry.
+Runtime statuses: `dispatching | completed | blocked | failed | needs_reconciliation`. Runner stores execution metadata (including thread/run IDs, bounded PR/MR snapshots, pending input count and errors), **not the full agent reply**, to keep the frequently-read runtime document small; full output remains available in the T3 thread. Runner persists `dispatching` **before** calling T3. On restart, it transitions stranded `dispatching` requests to `needs_reconciliation` and does not automatically relaunch them because the T3 thread might still be running. The first implementation uses `t3 thread start --wait --json`, so the T3 thread ID is recorded once the CLI returns; for a crash during launch, reconciliation requires inspecting T3 before manual retry.
 
 ## Consistency
 
@@ -54,7 +54,7 @@ The Runner's source is a Git checkout in `~/t3-companion`. An update checks for 
 
 ## Runner settings
 
-Runner settings are durable at `~/.t3/runner/config.json` (or the configured runner home):
+Runner settings are durable at `~/t3-companion/.data/runner/config.json` (or the configured runner home):
 ```json
 {"maxConcurrent":3,"scanIntervalMs":10000}
 ```
@@ -63,7 +63,7 @@ The global worker limit is 1–3; the scan interval is validated between 1000–
 
 The `runtime.json` entries may include `workflowStage` (`in_progress | human_review | awaiting_merge | done`), `pendingRequestCount`, `changeRequests` (`url` and `state`) and `lastInspectedAt`. Merge detection only trusts T3's linked PR/MR metadata; it never scans assistant replies, project branches or arbitrary PR mentions. Thread state may be temporarily stale while T3's PR metadata is being refreshed. No agent is instructed to update its own task status.
 
-## Runner health — `~/.t3/runner/health.json`
+## Runner health — `~/t3-companion/.data/runner/health.json`
 
 The Runner writes one atomic heartbeat after each scheduler pass:
 `{ "pid": 1234, "lastScanAt": "ISO", "scannedProjects": 2, "activeExecutions": 1, "scanErrors": 0 }`.
@@ -71,20 +71,18 @@ The CLI ignores a heartbeat whose PID does not match the live Runner lock.
 `t3-runner status` also reports built-in adapter capabilities and the registered project count.
 This file is diagnostics-only and must never be treated as authority for task completion.
 
-## Git checkout and compatibility
+## Git checkout and runtime home
 
-The install at `~/t3-companion` is Git-managed, with source code only.
-It must not contain Runner's durable state. Updates use `git pull --ff-only`,
-with Runner drain/restart coordinated by the extension. State is retained in
-`~/t3-companion/.data/runner`; legacy source at `~/.t3/companion/runner` or `~/.t3/t3-companion` is left intact
-after migration for safety.
+Runner source is Git-managed in `~/t3-companion`. Updates use `git pull --ff-only`
+after stopping and draining active tasks. All mutable Runner files live in
+`~/t3-companion/.data/runner/`, which is excluded by `.gitignore`.
+`T3_COMPANION_HOME` may override this location.
 
-## Runtime home migration
-
-All mutable Runner files default to `~/t3-companion/.data/runner/`.
-The checkout's root `.gitignore` excludes `.data/`. The controller detects
-the previous `~/.t3/runner/` directory, requests a graceful stop of any
-Runner still using it, and imports regular files only once after it is
-inactive. It excludes `runner.lock/`, `stop.json`, and `health.json`.
-A `.legacy-import.json` marker makes the import idempotent. Conflicting
-files are never overwritten and the old directory is retained for recovery.
+The controller does **not** discover or import previous `~/.t3/runner`
+directories. Before switching from an old installation, stop the previous
+Runner and manually copy the needed `projects.json` and `config.json`
+into the new data directory without overwriting newer state. Project-local
+`.t3/tasks.json` and `.t3/runtime.json` are unaffected. Older requests
+without an `execution` snapshot must be migrated before dispatch; they
+are rejected by the current v1 validator instead of being executed under
+ambiguous workspace defaults.
