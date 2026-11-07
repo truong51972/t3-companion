@@ -30,10 +30,11 @@ test('all verified linked PR/MRs must be merged before automatic Done', () => {
 
 test('missing, unknown, closed-unmerged or dismissed requests never become Done', () => {
   assert.equal(projectThreadInspection(thread('completed'))?.stage, 'human_review');
-  assert.equal(projectThreadInspection(thread('completed', 0, [pr(null)]))?.stage, 'human_review');
+  assert.equal(projectThreadInspection(thread('completed', 0, [pr(null)]))?.stage, 'awaiting_merge');
   assert.equal(projectThreadInspection(thread('completed', 0, [pr('closed')]))?.stage, 'human_review');
+  assert.equal(projectThreadInspection(thread('completed', 0, [pr('open'), pr('closed', 'https://gitlab.com/a/b/-/merge_requests/2')]))?.stage, 'human_review');
   assert.equal(projectThreadInspection(thread('completed', 0, [{ ...pr('merged'), source: 'stack-dismissed' }]))?.stage, 'human_review');
-  assert.equal(projectThreadInspection({ thread: { status: 'idle', linkedPullRequest: { url: 'https://github.com/org/repo/pull/3' } } })?.stage, 'human_review');
+  assert.equal(projectThreadInspection({ thread: { status: 'idle', linkedPullRequest: { url: 'https://github.com/org/repo/pull/3' } } })?.stage, 'awaiting_merge');
 });
 
 test('inaccessible or malformed thread metadata is not authoritative', () => {
