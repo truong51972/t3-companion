@@ -41,6 +41,32 @@ const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Human Review' }, { key: 'awaiting_merge', name: 'Awaiting Merge' }, { key: 'done', name: 'Done' },
 ];
+/** A single refresh control for both services, including consistent busy feedback. */
+function ServiceRefresh({ service, disabled, refreshing, onRefresh }: {
+  service: 'Runner' | 'Agent Skill';
+  disabled: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  return <button type="button" className="service-refresh"
+    aria-label={`Refresh ${service} status`} title={`Refresh ${service} status`}
+    aria-busy={refreshing} disabled={disabled || refreshing} onClick={onRefresh}>
+    <span aria-hidden="true">↻</span>
+  </button>;
+}
+
+/** Secondary service operations stay out of the main action row. */
+function ServiceMore({ service, menuRef, children }: {
+  service: 'Runner' | 'Agent Skill';
+  menuRef: React.RefObject<HTMLDetailsElement | null>;
+  children: React.ReactNode;
+}) {
+  return <details className="service-more" ref={menuRef}>
+    <summary aria-label={`More ${service} actions`} title={`More ${service} actions`}>More <span aria-hidden="true">⌄</span></summary>
+    <div className="service-menu">{children}</div>
+  </details>;
+}
+
 const emptyTasks = (): Tasks => ({ version: 1, tasks: [] });
 const emptyRuntime = (): Runtime => ({ version: 1, requests: {} });
 const blank = (): Task => ({ id: crypto.randomUUID(), title: '', description: '', prompt: '', status: 'todo', priority: 2 });
@@ -128,7 +154,8 @@ function App() {
   const detailsDialog = useRef<HTMLDialogElement>(null);
   const clearDialog = useRef<HTMLDialogElement>(null);
   const confirmationDialog = useRef<HTMLDialogElement>(null);
-  const runnerProjectsMenu = useRef<HTMLDetailsElement>(null);
+  const runnerActionsMenu = useRef<HTMLDetailsElement>(null);
+  const skillActionsMenu = useRef<HTMLDetailsElement>(null);
   const filesVersion = useRef(0);
   const shellVersion = useRef(0);
   const manualProject = useRef(false);
@@ -138,6 +165,7 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('auto');
   const [queueAdvancedOpen, setQueueAdvancedOpen] = useState(false);
   const [runnerResult, setRunnerResult] = useState('Not checked');
+  const [runnerBusy, setRunnerBusy] = useState(false);
   const runnerResultRef = useRef(runnerResult);
   runnerResultRef.current = runnerResult;
   const [skillState, setSkillState] = useState<'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error'>('checking');
@@ -224,7 +252,8 @@ function App() {
   }, [notice]);
   useEffect(() => {
     const menus = () => [
-      runnerProjectsMenu.current,
+      runnerActionsMenu.current,
+      skillActionsMenu.current,
       connectionMenu.current,
       ...Array.from(document.querySelectorAll<HTMLDetailsElement>('.task-more[open]')),
     ];
@@ -657,6 +686,7 @@ function App() {
     if (!host || !hostProject) throw new Error('Open a T3 thread in this environment first; Terminal RPC requires a host thread.');
     const key = scopedKey.current;
     runnerActionInFlight.current = true;
+    setRunnerBusy(true);
     try {
       // Respect manual Stop by disabling future one-shot auto-start.
       if (verb === 'stop' || verb === 'start' || verb === 'install') {
@@ -680,6 +710,7 @@ function App() {
       throw err;
     } finally {
       runnerActionInFlight.current = false;
+      setRunnerBusy(false);
     }
   }
   async function manageSkill(verb: 'status' | 'install' | 'update' | 'reinstall') {
