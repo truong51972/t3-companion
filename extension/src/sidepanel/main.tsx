@@ -165,6 +165,7 @@ function App() {
   const runnerVersion = /"version"\s*:\s*"([^"]+)"/.exec(runnerResult)?.[1];
   const runnerMaxConcurrent = /"maxConcurrent"\s*:\s*([1-3])/.exec(runnerResult)?.[1] || '3';
   const runnerScanInterval = /"scanIntervalMs"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
+  const runnerUpgradeRequired = /"upgradeRequired"\s*:\s*true/.test(runnerResult);
   const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerStarting ? 'Starting' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   // Cache is only a display hint. Live RPC validation remains authoritative.
@@ -952,6 +953,7 @@ function App() {
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {(runnerStatusError || runnerError) && <p className="runner-error" role="alert">Could not verify Runner: {runnerStatusError || runnerError}{runnerCacheAt ? ' (showing last known status)' : ''}</p>}
         {runnerInstalled === 'true' && <p className="runner-hint">Version: {runnerVersion ? runnerVersion.slice(0, 10) : 'Legacy · not recorded'}{runnerCacheAt ? ' · Last verified ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>}
+        {runnerInstalled === 'true' && (runnerUpgradeRequired || !runnerScanInterval) && <p className="runner-hint">Update Runner to enable persistent scheduler settings and live workflow scanning.</p>}
         {runnerInstalled === 'true' && !runnerBridgeMissing && <div className="runner-config" role="group" aria-label="Runner scheduler settings">
           <label>Max concurrent
             <select aria-label="Max concurrent Runner tasks" value={runnerMaxConcurrent}
