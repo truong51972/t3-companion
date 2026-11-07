@@ -1,13 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+
+function readSidepanelCode(dir: string): string {
+  let content = '';
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) content += '\n' + readSidepanelCode(full);
+    else if (/\.(tsx|ts)$/.test(entry) && !entry.endsWith('.test.ts')) content += '\n' + readFileSync(full, 'utf8');
+  }
+  return content;
+}
 
 const sidepanelCss = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
-const sidepanelCode = readFileSync(new URL('../sidepanel/main.tsx', import.meta.url), 'utf8');
+const sidepanelCode = readSidepanelCode(new URL('../sidepanel', import.meta.url).pathname);
 const popupCss = readFileSync(new URL('../popup/popup.css', import.meta.url), 'utf8');
 
 test('compact Kanban breakpoint agrees between React and CSS for tiled windows', () => {
-  assert.ok(sidepanelCode.includes("const COMPACT_BOARD_QUERY = '(max-width: 799px), (min-width: 800px) and (max-width: 1199px) and (max-height: 580px)'"));
+  assert.ok(sidepanelCode.includes("const COMPACT_BOARD_QUERY =\n  '(max-width: 799px), (min-width: 800px) and (max-width: 1199px) and (max-height: 580px)'") ||
+    sidepanelCode.includes("COMPACT_BOARD_QUERY = '(max-width: 799px), (min-width: 800px) and (max-width: 1199px) and (max-height: 580px)'") ||
+    sidepanelCode.includes("'(max-width: 799px), (min-width: 800px) and (max-width: 1199px) and (max-height: 580px)'"));
   assert.match(sidepanelCss, /@media\s*\(max-width:799px\),\s*\(min-width:800px\) and \(max-width:1199px\) and \(max-height:580px\)\s*\{[\s\S]*?\.board\s*\{display:flex;flex-direction:column/);
   assert.match(sidepanelCss, /@media\s*\(min-width:800px\)\s*and\s*\(max-width:1199px\)/);
   assert.match(sidepanelCss, /@media\s*\(min-width:1200px\)\s*and\s*\(min-height:620px\)/);

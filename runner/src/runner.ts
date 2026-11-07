@@ -1,16 +1,20 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { projectThreadInspection, type ThreadInspection } from './workflow.ts';
 import { requireT3Cli } from './t3-cli.ts';
-import { defaultHome, listProjects, readJson, readTasks, readRuntime, saveRuntime, readRunnerSettings } from './storage.ts';
+import { defaultHome, listProjects, readTasks, readRuntime, saveRuntime, readRunnerSettings } from './storage.ts';
 import type { Task, ExecutionRequest } from './storage.ts';
+import { acquire, release, status, requestStop, stopFile } from './lock.ts';
+import { reconcileProject, type InspectThread } from './reconciler.ts';
+
+export { status, requestStop };
+export type { InspectThread };
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const inspectExec = promisify(execFile);
-export type InspectThread = (project: string, threadId: string) => Promise<ThreadInspection | null>;
+
 /** Read T3's server-owned thread projection, never scrape visible UI or agent text. */
 export const inspectT3Thread: InspectThread = async (project, threadId) => {
   try {
@@ -22,41 +26,7 @@ export const inspectT3Thread: InspectThread = async (project, threadId) => {
     return null; // an unreachable T3 host is unknown, never proof of completion/merge
   }
 };
-const lockDir = (home: string) => path.join(home, 'runner.lock');
-const stopFile = (home: string) => path.join(home, 'stop.json');
-const isAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e: any) { return e.code === 'EPERM'; } };
-export async function status(home = defaultHome()) {
-  try { const owner = await readJson(path.join(lockDir(home), 'owner.json')); return { running: Number.isInteger(owner.pid) && isAlive(owner.pid), pid: owner.pid }; }
-  catch { return { running: false, pid: null }; }
-}
-async function acquire(home: string) {
-  await fs.mkdir(home, { recursive: true, mode: 0o700 });
-  const dir = lockDir(home);
-  try { await fs.mkdir(dir); }
-  catch (e: any) {
-    if (e.code !== 'EEXIST') throw e;
-    if ((await status(home)).running) throw new Error('Runner is already running');
-    const stat = await fs.stat(dir);
-    if (Date.now() - stat.mtimeMs < 3000) throw new Error('Runner lock is initializing; retry');
-    const stale = `${dir}.stale-${randomUUID()}`;
-    await fs.rename(dir, stale); await fs.rm(stale, { recursive: true });
-    await fs.mkdir(dir);
-  }
-  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
-  await fs.writeFile(path.join(dir, 'owner.json'), JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
-  return owner;
-}
-async function release(home: string, owner: {token: string}) {
-  try {
-    const current = await readJson(path.join(lockDir(home), 'owner.json'));
-    if (current.token === owner.token) await fs.rm(lockDir(home), { recursive: true });
-  } catch { /* lock removed */ }
-}
-export async function requestStop(home = defaultHome()) {
-  if (!(await status(home)).running) return false;
-  await fs.writeFile(stopFile(home), JSON.stringify({ at: new Date().toISOString() }), { mode: 0o600 });
-  return true;
-}
+
 export async function startDetached(home = defaultHome()) {
   if ((await status(home)).running) throw new Error('Runner already running');
   // Validate *before* announcing a running worker pool. A logged-in T3 Web
@@ -150,46 +120,6 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
   }
 
   const nonWorktreeProjects = new Set<string>();
-  const INSPECT_INTERVAL_MS = 30_000;
-  /** Reconcile finished/waiting sessions and PR merge status without editing tasks.json.
-   * Inspect no more than four threads per project pass; 30s per-thread throttle.
-   */
-  async function reconcile(project: string) {
-    if (!inspectThread) return;
-    const snapshot = await readRuntime(project);
-    const tasks = await readTasks(project);
-    const currentRequestIds = new Set(tasks.tasks.map(task => task.executionRequests?.at(-1)?.requestId).filter(Boolean));
-    const now = Date.now();
-    const items = Object.entries(snapshot.requests)
-      .filter(([id]) => currentRequestIds.has(id))
-      .filter(([, entry]) => Boolean(entry.threadId) &&
-        ['dispatching', 'completed', 'blocked', 'failed', 'needs_reconciliation'].includes(entry.status) &&
-        entry.workflowStage !== 'done' &&
-        (!entry.lastInspectedAt || now - Date.parse(entry.lastInspectedAt) >= INSPECT_INTERVAL_MS))
-      .slice(0, 4);
-    await Promise.allSettled(items.map(async ([id, entry]) => {
-      const observed = await inspectThread(project, entry.threadId!);
-      const at = new Date().toISOString();
-      await updateRuntime(project, current => {
-        const record = current.requests[id];
-        if (!record || record.threadId !== entry.threadId) return false;
-        record.lastInspectedAt = at;
-        if (observed) {
-          record.workflowStage = observed.stage;
-          record.pendingRequestCount = observed.pendingRequestCount;
-          record.changeRequests = observed.changeRequests;
-          if (record.status === 'blocked' && observed.stage !== 'human_review') {
-            // The user resumed this session in T3. It can run or finish without
-            // a new Companion request; keep the original request ID.
-            record.status = observed.stage === 'in_progress' ? 'dispatching' : 'completed';
-          } else if (record.status === 'dispatching' && observed.stage !== 'in_progress') {
-            record.status = observed.stage === 'human_review' && observed.pendingRequestCount > 0
-              ? 'blocked' : 'completed';
-          }
-        }
-      });
-    }));
-  }
   let stopping = false;
   const onSignal = () => { stopping = true; };
   process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
@@ -266,7 +196,9 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
           }
         } catch (error) { console.error(`Skipping ${project}: ${String(error)}`); }
         // Scan even when there are no new queue entries.
-        try { await reconcile(project); } catch (error) { console.error(`Status scan failed for ${project}: ${String(error)}`); }
+        try {
+          if (inspectThread) await reconcileProject(project, inspectThread, updateRuntime);
+        } catch (error) { console.error(`Status scan failed for ${project}: ${String(error)}`); }
       }
       if (once) break;
       await sleep(cycleMs);

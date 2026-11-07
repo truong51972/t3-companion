@@ -1,8 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 
-const code = readFileSync(new URL('../sidepanel/main.tsx', import.meta.url), 'utf8');
+function readSidepanelCode(dir: string): string {
+  let content = '';
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) content += '\n' + readSidepanelCode(full);
+    else if (/\.(tsx|ts)$/.test(entry) && !entry.endsWith('.test.ts')) content += '\n' + readFileSync(full, 'utf8');
+  }
+  return content;
+}
+
+const code = readSidepanelCode(new URL('../sidepanel', import.meta.url).pathname);
 const css = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
 
 test('Board drag supports all pointer devices instead of native HTML5 draggable buttons', () => {
