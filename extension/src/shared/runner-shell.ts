@@ -4,9 +4,9 @@
  * Only the first installation downloads it; ordinary commands are short and
  * readable, with no eval, base64-encoded programs, or shell-specific syntax.
  */
-export type RunnerVerb = 'install' | 'status' | 'start' | 'stop' | 'add' | 'remove';
-export const RUNNER_SOURCE_REF = '5ae13b7b08e78668dfc5ffb290fc958cc00c6bf8';
-export const CONTROL_SOURCE_REF = '715b00ce618ab821ee308bd5566723b9782b521d';
+export type RunnerVerb = 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove';
+export const RUNNER_SOURCE_REF = 'main';
+export const CONTROL_SOURCE_REF = 'main';
 
 const CONTROL_URL = 'https://raw.githubusercontent.com/truong51972/t3-companion/' +
   CONTROL_SOURCE_REF + '/runner/bin/companion-control.cjs';
@@ -30,7 +30,7 @@ const DIRECT_SCRIPT = PATH_SCRIPT +
 const INSTALL_SCRIPT = PATH_SCRIPT +
   "fetch('" + CONTROL_URL + "',{signal:AbortSignal.timeout(15000)})" +
   ".then(r=>{if(!r.ok)throw Error('Control download failed: HTTP '+r.status);return r.text()})" +
-  ".then(body=>{f.mkdirSync(p.dirname(s),{recursive:true});f.writeFileSync(s,body,{mode:0o600});require(s)})" +
+  ".then(body=>{f.mkdirSync(p.dirname(s),{recursive:true});const tmp=s+'.tmp';f.writeFileSync(tmp,body,{mode:0o600});f.renameSync(tmp,s);require(s)})" +
   ".catch(e=>{console.log('T3_COMPANION_ERROR:'+String(e.message||e).slice(-500));" +
   "console.log(process.argv[2]+':1');process.exitCode=1})";
 
@@ -43,7 +43,7 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
   if ((verb === 'add' || verb === 'remove') && !target) throw new Error('Project path required');
   const args = [verb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
-  return 'node -e "' + (verb === 'install' ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
+  return 'node -e "' + (['install', 'update', 'reinstall'].includes(verb) ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
 }
 
 /** A PTY Enter key sends CR; LF is Ctrl+J in terminal raw mode (not Enter on PowerShell). */
