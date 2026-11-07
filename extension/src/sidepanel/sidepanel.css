@@ -308,3 +308,5 @@ button.compact{padding:6px 10px}
   .sidepanel button,.sidepanel summary,.sidepanel select,.lane,.task-card{transition:none}
   .sidepanel .modal::backdrop{backdrop-filter:none}
 }
+
+.queue-warning{font-size:11px;line-height:1.5;color:#efc78a;background:#32291c;border:1px solid #59472c;border-radius:6px;padding:8px 10px}
