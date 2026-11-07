@@ -918,10 +918,8 @@ function App() {
             </div>
             <span className="lane-count">{laneTasks.length}</span>
           </>;
-          return <div className={'lane' + (dragTarget === column.key ? ' lane-drop-target' : '')} key={column.key}
-            onDragOver={event => { if (dragTaskId) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragTarget(column.key); } }}
-            onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragTarget(null); }}
-            onDrop={event => dropTask(event, column.key)}>
+          return <div className={'lane' + (dragTarget === column.key ? ' lane-drop-target' : '')}
+            key={column.key} data-lane-status={column.key}>
             {compactBoard && laneTasks.length > 0 ? (
               <button type="button" className="lane-heading lane-heading-toggle"
                 aria-expanded={expanded} aria-controls={'lane-body-' + column.key}
@@ -939,12 +937,19 @@ function App() {
                 const execution = taskExecution(task);
                 const queued = task.executionRequests?.length && !execution;
                 const latestRequest = execution?.changeRequests?.[0];
-                return <article className={'task-card' + (dragTaskId === task.id ? ' task-dragging' : '')} key={task.id}
-                  onDragOver={event => { if (dragTaskId) { event.preventDefault(); event.stopPropagation(); setDragTarget(column.key); } }}
-                  onDrop={event => dropTask(event, column.key, task.id)}>
-                  <button type="button" className="drag-handle" draggable aria-label={'Drag ' + task.title}
-                    title="Drag to move or reorder" onDragStart={event => beginTaskDrag(event, task.id)}
-                    onDragEnd={() => { setDragTaskId(null); setDragTarget(null); }}>⠿</button>
+                return <article className={'task-card' + (dragTaskId === task.id ? ' task-dragging' : '') +
+                    (dropHint?.hoveredTaskId === task.id && dropHint.edge ? ' task-drop-' + dropHint.edge : '')}
+                    key={task.id} data-task-id={task.id}
+                    onPointerDown={event => beginTaskPointer(event, task.id)}
+                    onClickCapture={event => {
+                      if (suppressDraggedClick.current === task.id) {
+                        suppressDraggedClick.current = null;
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }
+                    }}>
+                  <button type="button" className="drag-handle" aria-label={'Drag or move ' + task.title}
+                    title="Drag to move or reorder; use Move to for keyboard access">⠿</button>
                   <button className="task-open" type="button" aria-label={'View details for ' + task.title} onClick={() => openTask(task)}>
                     <span className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</span>
                     {task.description && <span className="task-description">{task.description}</span>}
@@ -1000,7 +1005,7 @@ function App() {
       )}
     </section>), [
     tasks, runtime, busy, projectId, tabId, environmentId, tabUrl, threads, projects, currentProject?.workspaceRoot,
-    compactBoard, expandedLanes, dragTaskId, dragTarget,
+    compactBoard, expandedLanes, dragTaskId, dragTarget, dropHint,
   ]);
   return <main className="stack sidepanel">
     <header className="header">
@@ -1347,6 +1352,14 @@ function App() {
       <div className="modal-actions"><button onClick={() => setQueueTarget(null)}>Cancel</button>
         <button className="primary" disabled={busy || !queueTarget} onClick={() => void action(async () => { if (queueTarget) { await enqueue(queueTarget); setQueueTarget(null); } })}>Queue request</button></div>
     </dialog>
+    {dragPreview && <div className="board-drag-preview" role="presentation"
+      style={{
+        left: Math.max(8, Math.min(dragPreview.x + 14, window.innerWidth - 220)),
+        top: Math.max(8, Math.min(dragPreview.y + 14, window.innerHeight - 55)),
+      }}>
+      <span className="board-drag-preview-icon" aria-hidden="true">⠿</span>
+      <span>{dragPreview.title}</span>
+    </div>}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<App />);
