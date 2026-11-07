@@ -21,3 +21,10 @@ test('worktree inspection passes inert project paths to a bundled Runner adapter
   assert.match(editor, /onExploreWorktrees\(\)/);
   assert.match(editor, /Read-only explorer/);
 });
+
+test('switching project or environment invalidates pending editor and discovery state', () => {
+  const app = readFileSync(new URL('../sidepanel/main.tsx', import.meta.url), 'utf8');
+  assert.match(app, /setIsEditorOpen\(false\);\s*\}, \[projectId, environmentId\]\)/);
+  assert.match(editor, /generationRef\.current\+\+/);
+  assert.match(editor, /generationRef\.current === generation/);
+});

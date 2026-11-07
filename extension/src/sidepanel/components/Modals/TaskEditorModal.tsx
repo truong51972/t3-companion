@@ -31,6 +31,7 @@ export function TaskEditorModal({
   busy: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const generationRef = useRef(0);
   const [draft, setDraft] = useState<Task>(task || blankTask());
   const [customModel, setCustomModel] = useState(false);
   const [modelMore, setModelMore] = useState(false);
@@ -48,6 +49,8 @@ export function TaskEditorModal({
   const [schedule, setSchedule] = useState('');
 
   useEffect(() => {
+    // Invalidate late model/worktree discoveries after dialog or task switches.
+    generationRef.current++;
     const next = task ? structuredClone(task) : blankTask();
     setDraft({ ...next, execution: next.execution || { workspace: 'auto' } });
     setSchedule(localDateTime(next.execution?.notBefore));
@@ -56,7 +59,7 @@ export function TaskEditorModal({
     setShowWorktrees(false);
     setInspectedWorktrees(null);
     setWorktreesError('');
-  }, [task, open]);
+  }, [task, open, discoveryScope]);
 
   useEffect(() => {
     if (!open || !discoveryScope) return;
@@ -65,6 +68,10 @@ export function TaskEditorModal({
     setRefsError('');
     setModels([]);
     setExplored(false);
+    setInspectedWorktrees(null);
+    setModelsBusy(false);
+    setWorktreesBusy(false);
+    setWorktreesError('');
     setRefsBusy(true);
     void onExploreRefs().then(result => {
       if (active) setRefs(result);
@@ -127,27 +134,32 @@ export function TaskEditorModal({
     }
     setShowWorktrees(true);
     if (inspectedWorktrees !== null) return;
+    const generation = generationRef.current;
     setWorktreesBusy(true);
     setWorktreesError('');
     try {
-      setInspectedWorktrees(await onExploreWorktrees());
+      const worktrees = await onExploreWorktrees();
+      if (generationRef.current === generation) setInspectedWorktrees(worktrees);
     } catch (error) {
-      setWorktreesError(String(error));
+      if (generationRef.current === generation) setWorktreesError(String(error));
     } finally {
-      setWorktreesBusy(false);
+      if (generationRef.current === generation) setWorktreesBusy(false);
     }
   }
   async function discoverModels() {
+    const generation = generationRef.current;
     setModelsBusy(true);
     setModelsError('');
     try {
       const result = await onExploreModels();
-      setModels(result);
-      setExplored(true);
+      if (generationRef.current === generation) {
+        setModels(result);
+        setExplored(true);
+      }
     } catch (error) {
-      setModelsError(String(error));
+      if (generationRef.current === generation) setModelsError(String(error));
     } finally {
-      setModelsBusy(false);
+      if (generationRef.current === generation) setModelsBusy(false);
     }
   }
   const scheduledDate = schedule ? new Date(schedule) : null;

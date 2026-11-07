@@ -669,8 +669,12 @@ function App() {
   }, [page, tabId, environmentId, projectId, currentProject?.workspaceRoot, recognized]);
 
   useEffect(() => {
+    // An edit draft belongs to one execution environment and project only.
+    // Never allow a stale dialog to save into a newly selected project.
     setDetailsTaskId(null);
-  }, [projectId]);
+    setEditingTask(null);
+    setIsEditorOpen(false);
+  }, [projectId, environmentId]);
 
   async function action(f: () => Promise<void>) {
     if (!tabId || !environmentId || !currentProject) return;
