@@ -4,6 +4,8 @@ import {
   installProjectSkill,
   isProjectSkillInstalled,
   isRecognizedTab,
+  exploreProjectRefs,
+  exploreEnvironmentModels,
   listSessionEnvironments,
   readProjectJson,
   runnerCommand,
@@ -1157,6 +1159,15 @@ function App() {
         open={isEditorOpen}
         task={editingTask}
         availableModels={availableModels}
+        discoveryScope={environmentId + ':' + (currentProject?.workspaceRoot || '')}
+        onExploreRefs={() => {
+          if (!tabId || !currentProject) return Promise.resolve([]);
+          return exploreProjectRefs(tabId, environmentId, currentProject.workspaceRoot);
+        }}
+        onExploreModels={() => {
+          if (!tabId) return Promise.resolve([]);
+          return exploreEnvironmentModels(tabId, environmentId);
+        }}
         onClose={() => {
           setIsEditorOpen(false);
           setEditingTask(null);

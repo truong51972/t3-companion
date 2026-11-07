@@ -67,7 +67,8 @@ export async function describeEnvironment(tabId: number, preferredEnvironmentId 
 
 const METHOD_ALLOWLIST = new Set([
   'orchestration.subscribeShell', 'orchestration.launchThread', 'orchestration.dispatchCommand',
-  'projects.readFile', 'projects.writeFile', 'terminal.open', 'terminal.write', 'terminal.observe', 'terminal.close',
+  'projects.readFile', 'projects.writeFile', 'vcs.listRefs', 'server.getConfig',
+  'terminal.open', 'terminal.write', 'terminal.observe', 'terminal.close',
 ]);
 
 /**
@@ -84,6 +85,43 @@ export async function shell(tabId: number, environmentId: string): Promise<Shell
   const threads = Array.isArray(value?.threads) ? value.threads : Array.isArray(value?.activeThreads) ? value.activeThreads : [];
   return { projects: value?.projects || [], threads };
 }
+/** Read-only T3 source-control discovery; never call git on the browser's local machine. */
+export interface T3GitRef {
+  name: string;
+  current: boolean;
+  isDefault: boolean;
+  isRemote?: boolean;
+  worktreePath: string | null;
+}
+export async function exploreProjectRefs(tabId: number, environmentId: string, cwd: string): Promise<T3GitRef[]> {
+  const result = await rpc<{ isRepo: boolean; refs: T3GitRef[]; nextCursor: number | null }>(
+    tabId, environmentId, 'vcs.listRefs', { cwd, limit: 200 }, 16000
+  );
+  if (!result.isRepo || !Array.isArray(result.refs)) return [];
+  return result.refs.filter(ref => typeof ref.name === 'string' && ref.name.length > 0);
+}
+
+/** Explicit on-demand model discovery from T3's own provider catalog. */
+export async function exploreEnvironmentModels(tabId: number, environmentId: string):
+  Promise<{ instanceId: string; model: string; name: string; provider: string }[]> {
+  const config = await rpc<{ providers: Array<{
+    instanceId: string; displayName?: string; enabled: boolean; installed: boolean;
+    availability?: 'available' | 'unavailable';
+    models: Array<{ slug: string; name: string }>;
+  }> }>(tabId, environmentId, 'server.getConfig', {}, 16000);
+  const models = new Map<string, { instanceId: string; model: string; name: string; provider: string }>();
+  for (const provider of config.providers || []) {
+    if (!provider.enabled || !provider.installed || provider.availability === 'unavailable') continue;
+    for (const model of provider.models || []) {
+      if (!model.slug) continue;
+      const key = JSON.stringify([provider.instanceId, model.slug]);
+      models.set(key, { instanceId: provider.instanceId, model: model.slug,
+        name: model.name || model.slug, provider: provider.displayName || provider.instanceId });
+    }
+  }
+  return [...models.values()];
+}
+
 export async function readProjectJson<T>(tabId: number, environmentId: string, cwd: string, file: string, fallback: T): Promise<T> {
   const result = await rpc<{contents: string; exists?: boolean; truncated: boolean}>(tabId, environmentId, 'projects.readFile',
     { cwd, relativePath: `.t3/${file}`, allowMissing: true });

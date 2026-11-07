@@ -739,3 +739,30 @@ button.compact{padding:6px 10px}
 .activity-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#829db7}
 .activity-dot.alert{background:#d3a17d}
 @media(max-width:420px){.service-facts{grid-template-columns:minmax(0,1fr)}.overview-activity{grid-template-columns:minmax(0,1fr)}}
+
+/* Compact native-discovery task composer. Secondary fields are progressive. */
+.task-editor-dialog .modal-content{gap:12px}
+.task-editor-dialog .task-execution-header{margin-top:0;padding-top:11px}
+.task-config-pair{display:grid;grid-template-columns:1fr 1fr;gap:9px;min-width:0}
+.task-config-pair label,.task-model-row label{min-width:0}
+.task-config-pair input,.task-config-pair select{width:100%;min-width:0}
+.task-ref-row{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;min-width:0}
+.task-ref-row .muted{font-size:10px;line-height:1.45}
+.task-ref-row .text-action,.task-discovery-panel .text-action{
+  padding:3px 2px;background:transparent;border:0;color:#b2c7e8;font-size:11px;cursor:pointer
+}
+.task-discovery-panel{display:grid;gap:8px;padding:10px;background:#252930;border:1px solid #3c4553;border-radius:8px;max-height:230px;overflow-y:auto}
+.task-discovery-panel>strong{font-size:11px}
+.task-discovery-panel p{font-size:10px;line-height:1.5}
+.task-discovery-item{display:grid;gap:3px;padding:7px;background:#20232a;border-radius:5px}
+.task-discovery-item>span{font-size:11px;color:#dce2ec}
+.task-discovery-item>small{font-size:10px;color:#9baac0;overflow-wrap:anywhere}
+.task-model-row{display:flex;align-items:end;gap:8px}
+.task-model-row>label{flex:1 1 auto}
+.task-model-more{min-height:35px;padding:7px 10px;flex:0 0 auto;font-size:11px}
+.task-advanced{border:1px solid #3a4049;border-radius:8px;background:#23262b}
+.task-advanced>summary{display:flex;justify-content:space-between;gap:8px;padding:10px 12px;cursor:pointer;font-size:11px;font-weight:600;list-style:none}
+.task-advanced>summary::-webkit-details-marker{display:none}
+.task-advanced>summary>.muted{font-size:10px;font-weight:400;text-align:right}
+.task-advanced-content{display:grid;gap:12px;padding:12px;border-top:1px solid #3a4049}
+@media(max-width:420px){.task-config-pair{grid-template-columns:minmax(0,1fr)}.task-model-row{flex-wrap:wrap}.task-model-more{margin-left:auto}}
