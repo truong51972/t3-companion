@@ -310,3 +310,135 @@ button.compact{padding:6px 10px}
 }
 
 .queue-warning{font-size:11px;line-height:1.5;color:#efc78a;background:#32291c;border:1px solid #59472c;border-radius:6px;padding:8px 10px}
+
+
+/*
+ * Windowed / snapped / Side Panel layout.
+ * Match the 799px compact threshold in main.tsx. Keep a single scrolling
+ * surface for each page: nested full-height grid rows were trapping scroll
+ * when Edge was tiled into a short window.
+ */
+.kanban-view,.overview-view{min-width:0;overflow:hidden!important}
+.kanban-view .board-scroll{
+  flex:1 1 auto;width:100%;max-width:100%;min-height:0;
+  overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.overview-view .overview-content{
+  flex:1 1 auto;min-height:0;min-width:0;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.sidepanel .view-header{min-width:0}
+.sidepanel .view-header .view-title{flex:1 1 auto;min-width:0}
+.sidepanel .view-title h2{flex:none}
+.sidepanel .view-title .muted{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidepanel .board-actions{flex:0 0 auto;min-width:0}
+.sidepanel .context-field,.sidepanel .context-field select{min-width:0}
+.sidepanel .context-row{width:100%;min-width:0}
+.sidepanel .runner-toolbar,.overview-expander-body,.runner-section{min-width:0}
+.overview-expander>summary{min-width:0}
+.overview-expander>summary .runner-state,.overview-expander>summary .skill-state{
+  flex:0 1 auto;max-width:62%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;
+}
+.overview-expander>summary .muted{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidepanel .modal .modal-content{scrollbar-gutter:stable;overflow-wrap:anywhere}
+.sidepanel .modal .modal-actions{min-width:0}
+.sidepanel .modal .modal-actions button{max-width:100%;min-width:0}
+.sidepanel .modal .request-row{min-width:0}
+.sidepanel .modal .request-row .request-info{flex:1 1 auto;min-width:0}
+.sidepanel .modal .request-row button{flex:0 1 auto;min-width:0;white-space:normal;text-align:center}
+
+/* Desktop: four independent scrolling lanes only when there is room for them. */
+@media (min-width:1200px) and (min-height:620px){
+  .board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;height:100%;min-height:100%;align-items:stretch}
+  .lane{min-width:0;min-height:0;height:100%;max-height:none}
+  .lane-body{min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden}
+}
+/* Tiled medium windows and short desktop windows: content-sized, two-column
+   board rather than four narrow, viewport-height lanes or nested page scroll. */
+@media (min-width:800px) and (max-width:1199px), (min-width:1200px) and (max-height:619px){
+  .board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;height:auto;min-height:0;align-content:start;align-items:start}
+  .lane{min-width:0;height:auto;min-height:120px;max-height:none;align-self:start}
+  .lane-body{min-height:0;max-height:min(56dvh,560px);overflow-y:auto;overflow-x:hidden}
+  .lane-empty{padding:18px 0}
+  .task-card{flex:0 0 auto}
+}
+/* One compact, expandable status group per lane. At tablet widths the
+   cards in an expanded group can still fill two columns. */
+@media (max-width:799px){
+  .kanban-view .board-scroll{padding:0 12px 16px}
+  .board{display:flex;flex-direction:column;gap:9px;height:auto;min-height:0;width:100%}
+  .lane{width:100%;height:auto;max-height:none;min-height:0;flex:0 0 auto;overflow:visible}
+  .lane-heading{min-height:38px;padding:10px 12px}
+  .lane-body{display:flex;flex-direction:column;min-height:0;max-height:none;overflow:visible;flex:0 0 auto;gap:8px;padding:9px}
+  .lane-body[hidden]{display:none}
+  .lane-empty{padding:10px 0}
+  .task-card{flex:0 0 auto;min-width:0}
+}
+@media (min-width:600px) and (max-width:799px){
+  .lane-body:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px}
+  .lane-body:not([hidden]) .task-card{height:auto;min-width:0}
+}
+/* Side Panel/window snapping: full-width selectors instead of two unreadable
+   half-width controls; all buttons must be reachable without horizontal scroll. */
+@media (max-width:520px){
+  .sidepanel .header{padding:7px 10px 8px;gap:7px}
+  .sidepanel .context-row{grid-template-columns:minmax(0,1fr);gap:7px}
+  .sidepanel .context-field{gap:3px}
+  .sidepanel .context-field select{height:30px;min-height:30px;padding:4px 28px 4px 9px;font-size:12px}
+  .sidepanel .section-tabs{padding-inline:10px}
+  .sidepanel .view-header{padding:10px 10px 9px}
+  .kanban-view .board-scroll{padding:0 10px 12px}
+  .overview-content{padding:0 10px 14px}
+  .overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .overview-breakdown{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .overview-breakdown-item{justify-content:flex-start;padding-left:9px;font-size:11px}
+  .overview-metric{padding:9px 8px;text-align:left}
+  .overview-metric strong{font-size:18px}
+  .overview-metric span{font-size:11px}
+  .overview-expander>summary{gap:7px;padding:9px 10px}
+  .overview-expander-body{padding:10px}
+  .overview-expander .runner-toolbar>button{
+    flex:1 1 calc(50% - 7px);min-width:0;max-width:100%;
+    min-height:34px;white-space:normal;line-height:1.35;
+  }
+  .overview-expander .runner-more{flex:1 1 calc(50% - 7px);min-width:0}
+  .overview-expander .runner-more>summary{min-height:34px;justify-content:center;width:100%}
+  .overview-expander .runner-autostart{flex:1 1 100%;width:100%;justify-content:flex-start;margin-left:0}
+  .overview-expander .runner-menu{max-width:calc(100vw - 24px)}
+  .sidepanel .modal{width:calc(100vw - 16px);max-width:calc(100vw - 16px)}
+  .sidepanel .modal .field-pair{grid-template-columns:1fr}
+  .sidepanel .modal .modal-actions{gap:7px}
+  .sidepanel .modal .modal-actions>button{flex:1 1 auto}
+  .sidepanel .modal .request-row{flex-wrap:wrap}
+}
+@media (max-width:340px){
+  .sidepanel .view-title{gap:5px}
+  .sidepanel .view-title .muted{font-size:10px}
+  .sidepanel .board-actions{gap:3px}
+  .sidepanel .board-actions .primary{padding-inline:7px}
+  .sidepanel .overview-content{padding-inline:8px}
+  .overview-expander>summary .runner-state,.overview-expander>summary .skill-state{max-width:53%}
+  .sidepanel .modal{width:calc(100vw - 10px);max-width:calc(100vw - 10px)}
+  .sidepanel .modal .modal-heading{padding:10px}
+  .sidepanel .modal .modal-content{padding:10px}
+  .sidepanel .modal .modal-actions{padding:10px}
+}
+/* Height matters when the browser is snapped into a tile. Allow dialogs to
+   use nearly all available height while their content scrolls independently. */
+@media (max-height:620px){
+  .sidepanel .header{padding-top:5px;padding-bottom:5px}
+  .sidepanel .section-tabs{min-height:32px}
+  .sidepanel .section-tabs button{padding-block:6px}
+  .sidepanel .view-header{padding-top:8px;padding-bottom:8px}
+  .sidepanel .modal{max-height:calc(100dvh - 12px)}
+  .sidepanel .modal .modal-heading{padding-block:9px}
+  .sidepanel .modal .modal-actions{padding-block:9px}
+  .sidepanel .modal .modal-content{min-height:0;overflow-y:auto}
+}
+@media (max-height:400px){
+  .sidepanel .modal{max-height:calc(100dvh - 8px)}
+  .sidepanel .modal .modal-heading{padding-block:7px}
+  .sidepanel .modal .modal-actions{padding-block:7px}
+}
