@@ -447,10 +447,13 @@ function App() {
   // No project/Runner/Skill polling during idle browsing.
   useEffect(() => {
     if (!tabId || !environmentId || !currentProject || !recognized || page !== 'kanban') return;
-    const hasOutstanding = tasks.tasks.some(task => (task.executionRequests || []).some(request => {
-      const status = runtime.requests[request.requestId]?.status;
-      return !status || status === 'dispatching';
-    }));
+    const hasOutstanding = tasks.tasks.some(task => {
+      const latest = task.executionRequests?.at(-1);
+      if (!latest || task.statusOverride || task.status === 'done') return false;
+      const entry = runtime.requests[latest.requestId];
+      return !entry || entry.status === 'dispatching' ||
+        (Boolean(entry.threadId) && ['human_review', 'awaiting_merge', 'in_progress'].includes(entry.workflowStage || ''));
+    });
     if (!hasOutstanding) return;
     let failures = 0;
     let pending = false;
