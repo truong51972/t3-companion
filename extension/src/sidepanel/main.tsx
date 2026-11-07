@@ -972,13 +972,11 @@ function App() {
                     <details className="task-more">
                       <summary aria-label={'More actions for ' + task.title} title="More actions">•••</summary>
                       <div className="task-menu">
-                        <label>Move to<select aria-label={'Move ' + task.title} value={task.status}
+                        <label>Move to<select aria-label={'Move ' + task.title} value={taskColumn(task)}
                           onChange={e => {
                             e.currentTarget.closest('details')?.removeAttribute('open');
                             const status = e.target.value as Status;
-                            void action(async () => mutateTask(task.id, d => ({
-                              ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status, statusOverride: true } : t),
-                            }), task));
+                            void action(() => moveTask(task, status));
                           }}>
                           {columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                         </select></label>
