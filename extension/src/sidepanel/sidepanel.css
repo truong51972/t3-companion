@@ -147,8 +147,7 @@ button.compact{padding:6px 10px}
 .overview-expander{min-width:0;border:1px solid #32343a;border-radius:7px;background:#1b1c20}
 .overview-expander>summary{display:flex;align-items:center;gap:8px;min-height:38px;padding:9px 11px;cursor:pointer;list-style:none;user-select:none}
 .overview-expander>summary::-webkit-details-marker{display:none}
-.overview-expander>summary::before{content:'›';font-size:17px;line-height:12px;color:#8f929a;transform:rotate(0deg);transition:transform .1s}
-.overview-expander[open]>summary::before{transform:rotate(90deg)}
+/* Disclosure indicators are provided by the shared Chevron SVG. */
 .overview-expander[open]>summary{border-bottom:1px solid #313338}
 .overview-expander-title{font-size:12px;font-weight:640;flex:1;min-width:0}
 .overview-expander-body{padding:11px;display:grid;gap:10px;min-width:0}
@@ -186,7 +185,7 @@ button.compact{padding:6px 10px}
 .board-empty h3{font-size:13px;font-weight:630}
 .board-empty p{max-width:260px;color:#9da0a7;font-size:12px;line-height:1.5}
 .board-empty .primary{margin-top:5px}
-.lane-chevron{display:inline-flex;align-items:center;justify-content:center;width:11px;color:#9ca0a9;font-size:16px;line-height:1}
+.lane-chevron{display:block;flex:none;color:#9ca0a9}
 .lane-heading-toggle{width:100%;font:inherit;color:inherit;text-align:left;background:transparent;border:0;border-radius:6px}
 .lane-heading-toggle:hover:not(:disabled){background:#242529;border-color:transparent}
 .lane-heading-toggle:focus-visible{outline-offset:-3px}
@@ -275,8 +274,7 @@ button.compact{padding:6px 10px}
 .advanced-options{border:1px solid #373a43;border-radius:7px;overflow:hidden}
 .advanced-options>summary{list-style:none;padding:9px 10px;cursor:pointer;font-size:12px;color:#c7cbd5}
 .advanced-options>summary::-webkit-details-marker{display:none}
-.advanced-options>summary::after{content:'⌄';float:right;color:#a0a4af}
-.advanced-options:not([open])>summary::after{content:'›'}
+/* Advanced options uses the same SVG as the other disclosures. */
 .advanced-options[open]>summary{border-bottom:1px solid #373a43}
 .advanced-fields{display:grid;gap:10px;padding:10px}
 .overview-expander{border-radius:8px}
@@ -504,8 +502,7 @@ button.compact{padding:6px 10px}
 .service-help{min-width:0;border-top:1px solid #343942;padding-top:8px}
 .service-help>summary{cursor:pointer;list-style:none;color:#a5abb6;font-size:11px;line-height:1.5}
 .service-help>summary::-webkit-details-marker{display:none}
-.service-help>summary::before{content:'›';display:inline-block;margin-right:6px;font-size:14px}
-.service-help[open]>summary::before{transform:rotate(90deg)}
+/* Nested disclosures reuse the shared SVG instead of font arrows. */
 .service-help>.runner-hint,.service-help>.skill-command,.service-help>.runner-result{margin-top:8px}
 .service-menu>.service-help{grid-column:1/-1}
 @media(max-width:360px){
@@ -619,3 +616,27 @@ button.compact{padding:6px 10px}
   .overview-expander .service-menu{max-width:min(228px,calc(100vw - 28px))}
 }
 @media(prefers-reduced-motion:reduce){.service-refresh.is-refreshing svg{animation:none}}
+
+
+/* Shared disclosure chevrons: consistent geometry, alignment and animation.
+   The down-pointing SVG rotates -90deg while collapsed and returns when open. */
+.disclosure-chevron{
+  display:block;flex:0 0 14px;width:14px;height:14px;min-width:14px;
+  color:#89919d;transform:rotate(-90deg);
+  transform-origin:center;transition:transform 160ms ease,color 160ms ease;
+}
+.overview-expander>summary>.disclosure-chevron{color:#929ba8}
+.overview-expander[open]>summary>.disclosure-chevron,
+.service-help[open]>summary>.disclosure-chevron,
+.advanced-options[open]>summary>.disclosure-chevron,
+.lane-chevron.is-open{transform:rotate(0deg);color:#c6d0e0}
+.overview-expander>summary:hover>.disclosure-chevron,
+.service-help>summary:hover>.disclosure-chevron,
+.advanced-options>summary:hover>.disclosure-chevron,
+.lane-heading-toggle:hover .disclosure-chevron{color:#e0e5ef}
+.service-help>summary{display:flex;align-items:center;gap:5px}
+.service-help>summary>.disclosure-chevron{width:13px;height:13px;min-width:13px;flex-basis:13px}
+.advanced-options>summary{display:flex;align-items:center;justify-content:space-between;gap:9px}
+.advanced-options>summary>.disclosure-chevron{margin-left:auto}
+.lane-title>.lane-chevron{width:14px;height:14px;flex-basis:14px}
+@media(prefers-reduced-motion:reduce){.disclosure-chevron{transition:none}}
