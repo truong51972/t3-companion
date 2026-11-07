@@ -1,3 +1,18 @@
 .popup{width:330px;padding:16px;max-height:580px;overflow-y:auto}
 .popup header{padding-bottom:8px}.popup .panel{gap:10px;background:transparent;padding:13px}
 .popup .panel .muted{font-size:12px;line-height:1.5}.popup .buttons button{padding:7px 9px}
+
+/* Keep the extension popup usable on narrow/tiled browser windows. */
+.popup{box-sizing:border-box;width:min(330px,100vw);min-width:0;max-width:100vw;max-height:min(580px,100dvh);overflow-x:hidden;overflow-y:auto}
+.popup .panel,.popup .row{min-width:0}
+.popup .row>div{min-width:0}
+.popup .row .caption,.popup .row .tag{overflow-wrap:anywhere}
+.popup .buttons{min-width:0}
+.popup .buttons button{min-width:0;white-space:normal}
+@media (max-width:320px){
+  .popup{padding:10px}
+  .popup .panel{padding:10px}
+  .popup .buttons{flex-direction:column}
+  .popup .buttons button{width:100%}
+}
+@media (max-height:430px){.popup{padding:10px}.popup .panel{padding:10px}}
