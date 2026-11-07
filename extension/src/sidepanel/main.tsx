@@ -37,6 +37,15 @@ function useCompactBoard(): boolean {
   return compact;
 }
 
+/** One consistent chevron for all expandable controls. CSS owns orientation. */
+function Chevron({ className = '' }: { className?: string }) {
+  return <svg className={'disclosure-chevron ' + className} aria-hidden="true"
+    viewBox="0 0 24 24" width="14" height="14" fill="none"
+    stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m6 9 6 6 6-6"/>
+  </svg>;
+}
+
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
   { key: 'review', name: 'Human Review' }, { key: 'awaiting_merge', name: 'Awaiting Merge' }, { key: 'done', name: 'Done' },
@@ -794,7 +803,7 @@ function App() {
           const expanded = !compactBoard || (laneTasks.length > 0 && expandedLanes[column.key]);
           const laneHeading = <>
             <div className="lane-title">
-              {compactBoard && <span className="lane-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>}
+              {compactBoard && <Chevron className={'lane-chevron' + (expanded ? ' is-open' : '')}/>}
               <span className={'lane-icon ' + column.key}/><strong>{column.name}</strong>
             </div>
             <span className="lane-count">{laneTasks.length}</span>
@@ -979,7 +988,7 @@ function App() {
           })}
         </div>
         <details className="overview-expander">
-          <summary><span className="overview-expander-title">Runner</span>
+          <summary><Chevron/><span className="overview-expander-title">Runner</span>
             <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')}
               title={runnerError || undefined}>{runnerState}{runnerCacheAt ? ' · Cached' : ''}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
           </summary>
@@ -1050,7 +1059,7 @@ function App() {
                   }}/>
                 <span>Auto-start when connected</span>
               </label>
-              <details className="service-help"><summary>Diagnostics</summary>
+              <details className="service-help"><summary><Chevron/>Diagnostics</summary>
                 <p className="service-meta">{runnerVersion ? 'Build ' + runnerVersion.slice(0, 10) : 'Unversioned installation'}{runnerCacheAt ? ' · Cached at ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>
                 <pre className="runner-result">{runnerResult}</pre>
               </details>
@@ -1061,7 +1070,7 @@ function App() {
           </div>
         </details>
         <details className="overview-expander">
-          <summary><span className="overview-expander-title">Agent Skill</span>
+          <summary><Chevron/><span className="overview-expander-title">Agent Skill</span>
             <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}
               title={skillCacheAt ? 'Cached · Last verified ' + new Date(skillCacheAt).toLocaleTimeString() : undefined}>
               {skillState === 'installed' ? 'Installed' : skillState === 'not_installed' ? 'Not installed'
@@ -1095,14 +1104,14 @@ function App() {
               </div>
             </div>
             {skillState !== 'installed' && <details className="service-help">
-              <summary>Manual setup</summary>
+              <summary><Chevron/>Manual setup</summary>
               <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
               <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
             </details>}
           </div>
         </details>
         <details className="overview-expander data-settings">
-          <summary><span className="overview-expander-title">Browser Data</span><span className="muted">Preferences & cache</span></summary>
+          <summary><Chevron/><span className="overview-expander-title">Browser Data</span><span className="muted">Preferences & cache</span></summary>
           <div className="overview-expander-body">
             <p className="overview-description">Reset Companion's browser preferences, selected environments/projects and cached Runner/Skill statuses. Tasks, worktrees and T3 sign-in are not affected.</p>
             <div className="runner-toolbar"><button className="danger-action" onClick={() => setConfirmClear(true)}>Clear browser data…</button></div>
@@ -1214,7 +1223,7 @@ function App() {
           </select>
         </label>
         <details className="advanced-options" open={queueAdvancedOpen} onToggle={event => setQueueAdvancedOpen(event.currentTarget.open)}>
-          <summary>Advanced options</summary>
+          <summary>Advanced options<Chevron/></summary>
           <div className="advanced-fields">
             {workspaceMode !== 'root' && <label>Base branch (optional)
               <input placeholder="Auto-detect current Git branch" value={worktree} onChange={e => {
