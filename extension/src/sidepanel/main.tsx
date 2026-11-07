@@ -6,12 +6,13 @@ import { environmentThreadUrl } from '../shared/environment-routing';
 import { selectT3Tab } from '../shared/tab-selection';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import type { SessionEnvironment } from '../bridge/page-session';
+import { cacheKey, defaultPreferences, loadPreferences, parseCache, persistPreferences, scopeKey, type CompanionPreferences, type WorkspaceMode } from '../shared/preferences';
 import '../shared/styles.css';
 import './sidepanel.css';
 
 type Status = 'todo' | 'in_progress' | 'review' | 'done';
 type Task = { id: string; title: string; description?: string; prompt: string; status: Status; priority?: number;
-  executionRequests?: { requestId: string; notBefore?: string; worktree?: string }[] };
+  executionRequests?: { requestId: string; notBefore?: string; worktree?: string; workspace?: WorkspaceMode }[] };
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
 type Page = 'kanban' | 'overview';
@@ -50,6 +51,34 @@ function validateRuntime(data: Runtime): Runtime {
 }
 function App() {
   const [page, setPage] = useState<Page>('kanban');
+  const [preferences, setPreferences] = useState<CompanionPreferences>(defaultPreferences);
+  const preferencesRef = useRef(preferences);
+  preferencesRef.current = preferences;
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [runnerCacheAt, setRunnerCacheAt] = useState<number | null>(null);
+  const [skillCacheAt, setSkillCacheAt] = useState<number | null>(null);
+  const [dragTaskId, setDragTaskId] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<Status | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void loadPreferences().then(stored => {
+      if (!live) return;
+      setPreferences(stored);
+      setPage(stored.page);
+      setManualEnvironmentId(stored.manualEnvironmentId);
+      setExpandedLanes({
+        todo: stored.expandedLanes.todo !== false,
+        in_progress: stored.expandedLanes.in_progress !== false,
+        review: stored.expandedLanes.review !== false,
+        done: stored.expandedLanes.done === true,
+      });
+    }).catch(() => {}).finally(() => { if (live) setPreferencesReady(true); });
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (preferencesReady) void persistPreferences(preferences).catch(() => {});
+  }, [preferencesReady, preferences]);
   const compactBoard = useCompactBoard();
   const [expandedLanes, setExpandedLanes] = useState<Record<Status, boolean>>({
     todo: true, in_progress: true, review: true, done: false,
@@ -92,6 +121,8 @@ function App() {
   const [draft, setDraft] = useState<Task>(blank());
   const [schedule, setSchedule] = useState('');
   const [worktree, setWorktree] = useState('');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('auto');
+  const [queueAdvancedOpen, setQueueAdvancedOpen] = useState(false);
   const [runnerResult, setRunnerResult] = useState('Not checked');
   const [skillState, setSkillState] = useState<'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error'>('checking');
   const [skillBusy, setSkillBusy] = useState(false);
@@ -115,11 +146,47 @@ function App() {
   const runnerHostProject = runnerHost && projects.find(p => p.id === runnerHost.projectId);
   const runnerHostAvailable = Boolean(runnerHost && runnerHostProject);
   const runnerStopping = /"stopRequested"\s*:\s*true/.test(runnerResult) && runnerRunning === 'true';
+  const runnerVersion = /"version"\s*:\s*"([^"]+)"/.exec(runnerResult)?.[1];
   const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerStarting ? 'Starting' : runnerInstalled === 'false'
     ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
+  // Cache is only a display hint. Live RPC validation remains authoritative.
+  useEffect(() => {
+    if (!environmentId) return;
+    let live = true;
+    const key = cacheKey('runner', environmentId);
+    void chrome.storage.local.get(key).then(data => {
+      const cached = parseCache<string>(data[key], (v): v is string => typeof v === 'string' && v.startsWith('{'));
+      if (live && cached) {
+        setRunnerResult(current => current === 'Not checked' ? cached.value : current);
+        setRunnerCacheAt(cached.verifiedAt);
+      }
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [environmentId]);
+  useEffect(() => {
+    if (!environmentId || !currentProject) return;
+    let live = true;
+    const key = cacheKey('skill', environmentId, currentProject.workspaceRoot);
+    setSkillCacheAt(null);
+    void chrome.storage.local.get(key).then(data => {
+      const cached = parseCache<'installed' | 'not_installed'>(data[key],
+        (v): v is 'installed' | 'not_installed' => v === 'installed' || v === 'not_installed');
+      if (live && cached) {
+        setSkillState(current => current === 'checking' ? cached.value : current);
+        setSkillCacheAt(cached.verifiedAt);
+      }
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [environmentId, currentProject?.workspaceRoot]);
   useEffect(() => { const dialog = editorDialog.current; if (!dialog) return; if (editing && !dialog.open) dialog.showModal(); else if (!editing && dialog.open) dialog.close(); }, [editing]);
   useEffect(() => { const dialog = queueDialog.current; if (!dialog) return; if (queueTarget && !dialog.open) dialog.showModal(); else if (!queueTarget && dialog.open) dialog.close(); }, [queueTarget]);
   useEffect(() => { const dialog = detailsDialog.current; if (!dialog) return; if (detailsTask && !dialog.open) dialog.showModal(); else if (!detailsTask && dialog.open) dialog.close(); }, [detailsTask]);
+  function onDialogBackdrop(event: React.MouseEvent<HTMLDialogElement>, close: () => void) {
+    if (event.target !== event.currentTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right ||
+        event.clientY < rect.top || event.clientY > rect.bottom) close();
+  }
   // Success notices are transient; errors remain until the next action.
   useEffect(() => {
     if (!notice) return;
@@ -160,6 +227,8 @@ function App() {
     const segments = url ? new URL(url).pathname.split('/') : [];
     const activeThread = next.threads.find(t => segments.includes(t.id));
     setProjectId(old => {
+      const saved = preferencesRef.current.projectByEnvironment[environmentId];
+      if (manualProject.current && saved && next.projects.some(p => p.id === saved)) return saved;
       if (!manualProject.current && activeThread && next.projects.some(p => p.id === activeThread.projectId)) return activeThread.projectId;
       return next.projects.some(p => p.id === old) ? old : next.projects[0]?.id || '';
     });
@@ -205,7 +274,8 @@ function App() {
       const session = await listSessionEnvironments(tab.id);
       if (version !== refreshVersion.current) return;
       setSessionEnvironments(old => JSON.stringify(old) === JSON.stringify(session.environments) ? old : session.environments);
-      const target = manualEnvironmentId || session.routeEnvironmentId ||
+      const selectedEnvironment = session.environments.some(item => item.environmentId === manualEnvironmentId) ? manualEnvironmentId : '';
+      const target = selectedEnvironment || session.routeEnvironmentId ||
         session.environments.find(item => item.source === 'direct')?.environmentId ||
         (session.environments.length === 1 ? session.environments[0]!.environmentId : '');
       const descriptor = session.environments.find(item => item.environmentId === target);
@@ -215,9 +285,9 @@ function App() {
       if (scopeChanged) {
         scopedKey.current = key;
         ++filesVersion.current; ++shellVersion.current;
-        manualProject.current = false;
+        manualProject.current = Boolean(preferencesRef.current.projectByEnvironment[descriptor.environmentId]);
         setProjects([]); setThreads([]); setProjectId('');
-        setTasks(emptyTasks()); setRuntime(emptyRuntime());
+        setTasks(emptyTasks()); setRuntime(emptyRuntime()); setRunnerCacheAt(null); setSkillCacheAt(null);
         setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
       }
       selectedTabRef.current = tab.id;
@@ -246,7 +316,7 @@ function App() {
       setError(String(e));
     } finally { if (version === refreshVersion.current) setBusy(false); }
   }, [manualTabId, manualEnvironmentId, refreshShell]);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { if (preferencesReady) void refresh(); }, [refresh, preferencesReady]);
   useEffect(() => {
     filesVersion.current++;
     setTasks(emptyTasks()); setRuntime(emptyRuntime());
@@ -316,9 +386,14 @@ function App() {
         const output = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'status');
         if (!active || scopedKey.current !== scope) return;
         const status = JSON.parse(output) as { installed?: boolean; running?: boolean; bridgeMissing?: boolean };
+        setRunnerCacheAt(null);
+        void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: output, verifiedAt: Date.now() } });
         if (status.installed && !status.bridgeMissing && !status.running && enabled && runnerAutoStartRef.current) {
           const started = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'start');
-          if (active && scopedKey.current === scope) setRunnerResult(started);
+          if (active && scopedKey.current === scope) {
+            setRunnerResult(started);
+            void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: started, verifiedAt: Date.now() } });
+          }
         } else {
           setRunnerResult(output);
         }
@@ -348,7 +423,10 @@ function App() {
       .then(installed => {
         if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
           skillCheckedProject.current = projectKey;
-          setSkillState(installed ? 'installed' : 'not_installed');
+          setSkillCacheAt(null);
+          const state = installed ? 'installed' : 'not_installed';
+          setSkillState(state);
+          void chrome.storage.local.set({ [cacheKey('skill', environmentId, currentProject.workspaceRoot)]: { value: state, verifiedAt: Date.now() } });
         }
       })
       .catch(error => {
@@ -399,7 +477,20 @@ function App() {
     }
   }
   function edit(task?: Task) { const value = task ? structuredClone(task) : blank(); setEditing(value); setDraft(value); }
-  function requestExecution(task: Task) { setSchedule(''); setWorktree(''); setQueueTarget(task); }
+  function requestExecution(task: Task) {
+    setSchedule('');
+    const saved = preferencesRef.current.workspaceByProject[scopeKey(environmentId, currentProject?.workspaceRoot || '')];
+    setWorkspaceMode(saved?.mode || 'auto');
+    setWorktree(saved?.baseRef || '');
+    setQueueAdvancedOpen(false);
+    setQueueTarget(task);
+  }
+  function rememberWorkspace(mode: WorkspaceMode, baseRef: string) {
+    if (!currentProject) return;
+    setPreferences(p => ({ ...p, workspaceByProject: {
+      ...p.workspaceByProject, [scopeKey(environmentId, currentProject.workspaceRoot)]: { mode, baseRef },
+    } }));
+  }
   async function saveTask() {
     if (!draft.title.trim() || !draft.prompt.trim()) throw new Error('Title and prompt are required');
     const original = tasks.tasks.find(t => t.id === draft.id);
@@ -411,9 +502,9 @@ function App() {
   async function enqueue(task: Task) {
     const when = schedule ? new Date(schedule).toISOString() : undefined;
     await mutateTask(task.id, document => ({ ...document, tasks: document.tasks.map(t => t.id === task.id
-      ? { ...t, executionRequests: [...(t.executionRequests || []), { requestId: crypto.randomUUID(), ...(when ? { notBefore: when } : {}), ...(worktree.trim() ? { worktree: worktree.trim() } : {}) }] }
+      ? { ...t, executionRequests: [...(t.executionRequests || []), { requestId: crypto.randomUUID(), ...(when ? { notBefore: when } : {}), ...(workspaceMode !== 'root' && worktree.trim() ? { worktree: worktree.trim() } : {}), workspace: workspaceMode }] }
       : t) }), task);
-    setSchedule(''); setWorktree(''); setNotice('Request queued; Runner will dispatch when eligible.');
+    setSchedule(''); setNotice('Request queued; Runner will dispatch when eligible.');
   }
   const taskExecution = (task: Task) => {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
@@ -439,12 +530,30 @@ function App() {
       return false;
     }
   }
-  async function openTask(task: Task) {
-    const linked = taskLinkedThread(task);
-    if (linked && await openLinkedThread(linked)) return;
-    setDetailsTaskId(task.id);
+  function openTask(task: Task) { setDetailsTaskId(task.id); }
+  async function moveTask(task: Task, status: Status, beforeTaskId?: string) {
+    if (beforeTaskId === task.id) return;
+    await mutateTask(task.id, document => {
+      const updated = { ...task, status };
+      const remaining = document.tasks.filter(t => t.id !== task.id);
+      const at = beforeTaskId ? remaining.findIndex(t => t.id === beforeTaskId) : -1;
+      remaining.splice(at === -1 ? remaining.length : at, 0, updated);
+      return { ...document, tasks: remaining };
+    }, task);
   }
-  async function manageRunner(verb: 'install' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
+  function beginTaskDrag(event: React.DragEvent, taskId: string) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', taskId);
+    setDragTaskId(taskId);
+  }
+  function dropTask(event: React.DragEvent, status: Status, beforeTaskId?: string) {
+    event.preventDefault(); event.stopPropagation();
+    const taskId = dragTaskId || event.dataTransfer.getData('text/plain');
+    setDragTaskId(null); setDragTarget(null);
+    const task = tasks.tasks.find(item => item.id === taskId);
+    if (task) void action(() => moveTask(task, status, beforeTaskId));
+  }
+  async function manageRunner(verb: 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove') {
     if (!tabId || !currentProject) return;
     const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
     const hostProject = host && projects.find(p => p.id === host.projectId);
@@ -462,7 +571,8 @@ function App() {
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
         ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
-        setRunnerResult(result);
+        setRunnerResult(result); setRunnerCacheAt(null);
+        void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: result, verifiedAt: Date.now() } });
         if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
     } catch (err) {
@@ -472,23 +582,26 @@ function App() {
       runnerActionInFlight.current = false;
     }
   }
-  async function manageSkill(verb: 'status' | 'install') {
+  async function manageSkill(verb: 'status' | 'install' | 'update' | 'reinstall') {
     if (!tabId || !environmentId || !currentProject) return;
     const key = scopedKey.current;
     const selectedProjectId = projectId;
     setSkillBusy(true); setSkillError('');
     try {
-      if (verb === 'install') {
+      if (verb !== 'status') {
         const host = visibleThreads[0] || threads.find(t => projects.some(p => p.id === t.projectId));
         const hostProject = host && projects.find(p => p.id === host.projectId);
         if (!host || !hostProject) throw new Error('Open a T3 thread in this environment before installing the skill.');
-        await installProjectSkill(tabId, environmentId, hostProject, host.id, currentProject.workspaceRoot);
+        await installProjectSkill(tabId, environmentId, hostProject, host.id, currentProject.workspaceRoot, verb);
       }
       const installed = await isProjectSkillInstalled(tabId, environmentId, currentProject.workspaceRoot);
-      if (verb === 'install' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
+      if (verb !== 'status' && !installed) throw new Error('Installer completed but no project skill was found. Check the terminal output or install manually.');
       if (scopedKey.current === key && projectSelectionRef.current === selectedProjectId) {
         skillCheckedProject.current = key + ':' + currentProject.workspaceRoot;
-        setSkillState(installed ? 'installed' : 'not_installed');
+        const state = installed ? 'installed' : 'not_installed';
+        setSkillState(state); setSkillCacheAt(null);
+        void chrome.storage.local.set({ [cacheKey('skill', environmentId, currentProject.workspaceRoot)]: { value: state, verifiedAt: Date.now() } });
+        if (verb !== 'status') setNotice('Agent Skill: ' + verb + ' completed.');
         if (verb === 'install') setNotice('Agent skill installed for this project.');
       }
     } catch (error) {
