@@ -206,3 +206,74 @@ test('build pins the source commit instead of using main for PR-preview upgrades
   assert.match(controller, /if \(sourceRef === 'main'\)/);
   assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
 });
+
+test('upgrade keeps new Runner if restart is blocked only by missing host T3 CLI', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-missing-cli-'));
+  const root = path.join(home, '.t3', 'companion');
+  const sha = 'd'.repeat(40);
+  const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
+  const stateFile = path.join(home, 'runner-state.txt');
+  const previousRunner = [
+    "const fs=require('node:fs');",
+    "const command=process.argv[2],state=process.env.RUNNER_TEST_STATE;",
+    "if(command==='status')console.log(JSON.stringify({running:fs.readFileSync(state,'utf8')==='1'}));",
+    "else if(command==='stop'){fs.writeFileSync(state,'0');console.log(JSON.stringify({requested:true}))}",
+    "else if(command==='start'){fs.writeFileSync(state,'1');console.log(JSON.stringify({pid:123}))}",
+  ].join('');
+  const upgradedRunner = [
+    "import fs from 'node:fs';",
+    "const command=process.argv[2],state=process.env.RUNNER_TEST_STATE;",
+    "if(command==='status')console.log(JSON.stringify({running:false,pid:null,cli:{available:false}}));",
+    "else if(command==='start'){console.error('T3 CLI not found on this environment host');process.exitCode=1;}",
+    "else if(command==='stop'){fs.writeFileSync(state,'0');console.log(JSON.stringify({requested:false}));}",
+  ].join('');
+  const files: Record<string, string> = {
+    'runner/bin/t3-runner.mjs': upgradedRunner,
+    'runner/src/cli.ts': '// upgraded',
+    'runner/src/runner.ts': '// upgraded',
+    'runner/src/storage.ts': '// upgraded',
+    'runner/src/workflow.ts': '// upgraded',
+    'runner/src/t3-cli.ts': '// upgraded',
+  };
+  try {
+    mkdirSync(path.join(root, 'runner', 'bin'), { recursive: true });
+    mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
+    writeFileSync(stateFile, '1');
+    writeFileSync(path.join(root, 'runner-control.cjs'), '// obsolete');
+    for (const file of Object.keys(files).filter(item => !item.endsWith('workflow.ts') && !item.endsWith('t3-cli.ts'))) {
+      writeFileSync(path.join(root, file), file.endsWith('.mjs') ? previousRunner : '// legacy');
+    }
+    const command = runnerShellCommand('update', undefined, MARKER);
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    const mock = [
+      'const sha=' + JSON.stringify(sha) + ';',
+      'const controller=' + JSON.stringify(controller) + ';',
+      'const files=' + JSON.stringify(files) + ';',
+      'global.fetch=async url=>{',
+      'const input=String(url);',
+      "if(input.endsWith('/runner/bin/companion-control.cjs'))return {ok:true,text:async()=>controller};",
+      "if(input.includes('/commits/'))return {ok:true,json:async()=>({sha})};",
+      "const key=input.split('/'+sha+'/')[1];",
+      "if(key&&Object.hasOwn(files,key))return {ok:true,text:async()=>files[key]};",
+      "throw new Error('Unexpected download '+input);",
+      '};',
+    ].join('');
+    const result = spawnSync(process.execPath,
+      ['-e', mock + script, '--', 'update', MARKER, RUNNER_SOURCE_REF],
+      { env: { ...process.env, HOME: home, USERPROFILE: home, RUNNER_TEST_STATE: stateFile },
+        encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 0, [result.stderr, result.stdout].join('\n'));
+    const marker = result.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
+    assert.ok(marker, result.stdout);
+    const state = JSON.parse(marker[1]);
+    assert.equal(state.installed, true);
+    assert.equal(state.updated, true);
+    assert.equal(state.requiresCli, true);
+    assert.equal(state.running, false);
+    assert.equal(state.version, sha);
+    assert.ok(existsSync(path.join(root, 'runner', 'src', 't3-cli.ts')));
+    assert.equal(JSON.parse(readFileSync(path.join(root, 'runner', 'install.json'), 'utf8')).sha, sha);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
