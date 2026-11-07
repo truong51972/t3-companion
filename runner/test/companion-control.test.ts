@@ -45,7 +45,7 @@ else { console.error('Invalid command'); process.exitCode=1; }
   const env = { ...process.env, HOME: home, USERPROFILE: home,
     RUNNER_TEST_STATE: path.join(home, 'runner-state.txt') };
   const run = (verb, target, marker = MARKER) => {
-    const args = ['-e', 'require(' + JSON.stringify(control) + ')', '--', verb, marker];
+    const args = ['-e', 'require(' + JSON.stringify(control) + ')', '--', 'companion', verb, marker];
     if (target !== undefined) args.push(Buffer.from(target).toString('base64url'));
     const child = spawnSync(process.execPath, args, { env, encoding:'utf8', timeout: 15000 });
     const match = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);

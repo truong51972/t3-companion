@@ -2,7 +2,7 @@
 // Git-checkout local controller; durable runtime is in ~/.t3/runner.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawnSync}=require('node:child_process');
-const [verb,marker,encodedTarget]=process.argv.slice(1);
+const [verb,marker,encodedTarget]=process.argv.slice(2);
 const checkout=path.resolve(__dirname,'..','..');
 const entry=path.join(checkout,'runner','bin','t3-runner.mjs');
 const legacyEntry=path.join(os.homedir(),'.t3','companion','runner','bin','t3-runner.mjs');

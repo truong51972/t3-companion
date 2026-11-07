@@ -48,7 +48,7 @@ test('project paths are encoded as inert data, never interpolated into a shell',
 test('validation prevents shell injection in marker and concurrency', () => {
   assert.throws(() => runnerShellCommand('start', undefined, 'bad; exit 0'), /marker/);
   assert.throws(() => runnerShellCommand('configure', '5', MARKER), /Max concurrent/);
-  assert.ok(runnerShellCommand('configure', '3', MARKER).includes(' -- configure '));
+  assert.ok(runnerShellCommand('configure', '3', MARKER).includes(' -- companion configure '));
 });
 
 test('uninstalled status is read-only and reports no Runner', () => {
@@ -56,7 +56,7 @@ test('uninstalled status is read-only and reports no Runner', () => {
   try {
     const command = runnerShellCommand('status', undefined, MARKER);
     const source = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', source, '--', 'status', MARKER],
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
       { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(child.status, 0, child.stderr);
     const marker = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
@@ -76,7 +76,7 @@ test('legacy file-copy install is recognized for a one-time Git migration', () =
     writeFileSync(legacy, '');
     const command = runnerShellCommand('status', undefined, MARKER);
     const source = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', source, '--', 'status', MARKER],
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
       { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(child.status, 0, child.stderr);
     assert.match(child.stdout, /"installed":true/);
@@ -90,7 +90,7 @@ test('missing controller fails clearly instead of a T3 RPC timeout', () => {
   try {
     const command = runnerShellCommand('start', undefined, MARKER);
     const source = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', source, '--', 'start', MARKER],
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'start', MARKER],
       { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(child.status, 1);
     assert.match(child.stdout, /T3_COMPANION_ERROR/);
