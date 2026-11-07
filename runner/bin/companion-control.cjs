@@ -17,6 +17,7 @@ const files = [
   'runner/src/cli.ts',
   'runner/src/runner.ts',
   'runner/src/storage.ts',
+  'runner/src/workflow.ts',
 ];
 // Release channel: resolve main to one immutable SHA before fetching all files.
 const REPOSITORY = 'truong51972/t3-companion';
