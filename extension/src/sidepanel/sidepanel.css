@@ -513,3 +513,109 @@ button.compact{padding:6px 10px}
  .service-actions>button:not(.service-refresh){min-height:34px}
 }
 @media(prefers-reduced-motion:reduce){.service-refresh.is-refreshing>span{animation:none}}
+
+
+/* Service panel redesign: minimal control chrome and anchored, non-expanding
+   More menus. Applied after the legacy wide-screen/side-panel rules above. */
+.overview-content{gap:8px}
+.overview-expander{border-color:#33373e;background:#1c1e22;border-radius:9px}
+.overview-expander>summary{
+  min-height:42px;padding:10px 12px;
+  background:transparent;border-radius:9px
+}
+.overview-expander[open]>summary{border-radius:9px 9px 0 0}
+.overview-expander>summary:hover{background:#24272c}
+.overview-expander-body{display:flex;flex-direction:column;gap:8px;padding:11px 12px 12px}
+.overview-expander .runner-section{display:flex;flex-direction:column;gap:8px}
+.runner-state,.skill-state{font-size:11px;font-weight:500}
+.service-info{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;min-height:32px;padding:6px 9px;border-radius:6px;
+  background:#262621;color:#c7c2aa;font-size:11px;line-height:1.45;
+}
+.service-info span{flex:1 1 auto;min-width:0}
+.service-info-upgrade{border:1px solid #494438}
+.service-info .text-action{
+  flex:0 0 auto;min-height:22px;padding:2px 5px;
+  border:0;background:transparent;color:#e2c48d;
+  text-decoration:underline;text-underline-offset:3px;font-weight:600;font-size:11px
+}
+.service-info .text-action:hover:not(:disabled){border:0;background:#373126;color:#f6dbad}
+.service-meta{font-size:10px;line-height:1.4;color:#8f959e}
+.overview-expander .runner-config{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  min-height:35px;padding:0;border:0;background:transparent;
+}
+.overview-expander .runner-config label{
+  display:block;min-width:0;width:auto;margin:0;
+  color:#aab0b8;font-size:11px;font-weight:500;white-space:nowrap
+}
+.overview-expander .runner-config select{
+  flex:0 0 auto;min-width:112px;max-width:140px;height:30px;min-height:30px;
+  padding:4px 26px 4px 9px;background:#27292e;font-size:11px
+}
+.overview-expander .runner-config .runner-config-meta{
+  min-width:0;flex:1 1 155px;color:#858b95;font-size:10px
+}
+.overview-expander .service-actions{
+  position:relative;display:flex;align-items:center;flex-wrap:nowrap;
+  gap:7px;min-height:32px;min-width:0
+}
+.overview-expander .service-actions>button:not(.service-refresh){
+  min-height:30px;padding:5px 11px;flex:0 0 auto
+}
+.overview-expander .service-tools{
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:6px;min-width:0;margin-left:auto;flex:0 0 auto;
+}
+.overview-expander .service-actions .service-refresh,
+.overview-expander .service-more>summary{
+  display:grid;place-items:center;flex:none;width:30px;height:30px;
+  min-height:30px;min-width:30px;padding:0;border:1px solid #3f434a;
+  border-radius:6px;background:#27292e;color:#aeb5c0
+}
+.overview-expander .service-actions .service-refresh{margin:0}
+.overview-expander .service-actions .service-refresh svg{width:15px;height:15px}
+.service-refresh.is-refreshing svg{animation:service-refresh-spin 1.1s linear infinite}
+.overview-expander .service-more{position:relative;flex:0 0 30px;width:30px;margin:0}
+.overview-expander .service-more[open]{flex:0 0 30px;width:30px;margin:0}
+.overview-expander .service-more[open]>summary{
+  display:grid;place-items:center;width:30px;margin:0;
+  background:#343b47;border-color:#64738c;color:#edf1f7
+}
+.overview-expander .service-more>summary span{font-size:18px;line-height:12px;letter-spacing:1px;font-weight:700;transform:translateY(-4px)}
+.overview-expander .service-more>summary:hover{background:#353942;color:#eef1f6}
+.overview-expander .service-menu{
+  position:absolute;z-index:40;top:calc(100% + 6px);right:0;
+  display:flex;flex-direction:column;gap:2px;
+  width:228px;min-width:190px;max-width:min(228px,calc(100vw - 32px));
+  margin:0;padding:5px;overflow-wrap:anywhere;
+  border:1px solid #494f59;border-radius:9px;
+  background:#272a30;box-shadow:0 14px 38px #000a;
+}
+.overview-expander .service-menu>button{
+  display:block;width:100%;min-width:0;min-height:31px;
+  padding:7px 9px;border:0;background:transparent;border-radius:5px;
+  color:#dadee5;text-align:left;font-size:11px;line-height:1.35
+}
+.overview-expander .service-menu>button:hover:not(:disabled){background:#393e47;border:0}
+.overview-expander .service-menu-divider{width:100%;height:1px;margin:4px 0;background:#41464f}
+.sidepanel .service-menu .runner-autostart{
+  width:100%;display:flex;gap:8px;margin:0;padding:7px 9px;
+  border-radius:5px;color:#c7cbd4;font-size:11px;line-height:1.3
+}
+.sidepanel .service-menu .runner-autostart:hover{background:#343942}
+.service-menu>.service-help{width:100%;padding:6px 9px;margin:0;border-top:1px solid #41464f}
+.service-menu>.service-help>summary{font-size:11px;color:#b3b9c4}
+.service-menu>.service-help .runner-result{max-height:180px}
+.overview-expander .service-help{padding-top:7px;margin-top:1px}
+.overview-expander .service-help>summary{font-size:11px;color:#8e96a3}
+.overview-expander .service-help .skill-command{font-size:10px}
+@media(max-width:420px){
+  .overview-expander .runner-config{gap:7px}
+  .overview-expander .runner-config label{width:auto}
+  .overview-expander .runner-config .runner-config-meta{flex:1 1 100%;padding:0}
+  .overview-expander .service-actions{gap:5px}
+  .overview-expander .service-menu{max-width:min(228px,calc(100vw - 28px))}
+}
+@media(prefers-reduced-motion:reduce){.service-refresh.is-refreshing svg{animation:none}}
