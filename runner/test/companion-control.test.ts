@@ -23,7 +23,7 @@ function fixture(t) {
     const root = path.join(home, '.t3', 'companion', 'runner');
     mkdirSync(path.join(root, 'bin'), { recursive: true });
     mkdirSync(path.join(root, 'src'), { recursive: true });
-    for (const file of ['cli.ts', 'runner.ts', 'storage.ts', 'workflow.ts']) writeFileSync(path.join(root, 'src', file), '');
+    for (const file of ['cli.ts', 'runner.ts', 'storage.ts', 'workflow.ts', 't3-cli.ts']) writeFileSync(path.join(root, 'src', file), '');
     writeFileSync(path.join(root, 'bin', 't3-runner.mjs'), `
       import fs from 'node:fs';
       const file=process.env.RUNNER_TEST_STATE,verb=process.argv[2];
