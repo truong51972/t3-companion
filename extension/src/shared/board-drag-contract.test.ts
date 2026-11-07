@@ -29,3 +29,11 @@ test('dropping on lanes, including empty and collapsed statuses, has visible fee
   assert.match(css, /\.board-drag-preview\{/);
   assert.match(css, /pointer-events:none/);
 });
+
+test('drag grip supports keyboard reordering and status changes', () => {
+  assert.match(code, /onKeyDown=\{event => keyboardMoveTask\(event, task\)\}/);
+  assert.match(code, /'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'/);
+  assert.match(code, /await moveTask\(task, destination, beforeTaskId\)/);
+  assert.match(code, /grip\?\.focus\(\)/);
+  assert.match(code, /Move to<select aria-label=\{'Move ' \+ task.title\} value=\{taskColumn\(task\)\}/);
+});
