@@ -21,6 +21,12 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   const actualVerb = verb === 'reinstall' || verb === 'update' ? 'status' : verb;
   const args = ['companion', actualVerb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
   const control = 'node -e "' + (verb === 'status' ? STATUS : ENTRY) + '" -- ' + args.join(' ');
+  // Git commands can call the file directly after clone/pull. No eval-style
+  // launcher is needed for installation, updates or repair.
+  const localControl = (hostOs === 'windows'
+    ? 'node "$HOME/.t3/t3-companion/runner/bin/companion-control.cjs" '
+    : 'node ~/.t3/t3-companion/runner/bin/companion-control.cjs ') +
+    actualVerb + ' ' + marker;
   if (hostOs === 'windows' && ['install', 'update', 'reinstall'].includes(verb)) {
     // PowerShell 5.1 and 7: native Git does not reliably expand ~ on Windows.
     // Check LASTEXITCODE before calling the local checkout's controller.
@@ -28,14 +34,14 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
     const git = verb === 'install'
       ? 'git clone ' + RUNNER_REPOSITORY + ' ' + dir
       : 'git -C ' + dir + ' pull --ff-only';
-    return git + '; if ($LASTEXITCODE -eq 0) { ' + control +
+    return git + '; if ($LASTEXITCODE -eq 0) { ' + localControl +
       ' } else { Write-Output "' + marker + ':1" }';
   }
   if (verb === 'install')
     return 'git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT +
-      ' && ' + control + ' || echo ' + marker + ':1';
+      ' && ' + localControl + ' || echo ' + marker + ':1';
   if (verb === 'update' || verb === 'reinstall')
-    return 'git -C ' + RUNNER_CHECKOUT + ' pull --ff-only && ' + control + ' || echo ' + marker + ':1';
+    return 'git -C ' + RUNNER_CHECKOUT + ' pull --ff-only && ' + localControl + ' || echo ' + marker + ':1';
   return control;
 }
 /** T3 PTY Enter requires CR. */

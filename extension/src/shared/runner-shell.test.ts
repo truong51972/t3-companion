@@ -12,9 +12,10 @@ const MARKER = 'COMPANION_' + 'a'.repeat(32);
 test('install is a plain git clone, not a remote JavaScript downloader', () => {
   const command = runnerShellCommand('install', undefined, MARKER);
   assert.ok(command.startsWith('git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT));
-  assert.ok(command.includes(' && node -e '), 'the local controller starts only after clone succeeds');
+  assert.ok(command.includes(' && node ~/.t3/t3-companion/runner/bin/companion-control.cjs install '),
+    'the installed controller starts only after a successful clone');
   assert.ok(command.endsWith(' || echo ' + MARKER + ':1'));
-  assert.doesNotMatch(command, /raw\.githubusercontent|fetch\(|curl |wget |git reset|eval\(/);
+  assert.doesNotMatch(command, /node -e|raw\.githubusercontent|fetch\(|curl |wget |git reset|eval\(/);
 });
 
 test('updates and repairs use fast-forward-only git pull', () => {
@@ -131,5 +132,6 @@ test('Windows Git operations use a PowerShell-safe home path, not native tilde',
     assert.ok(!cmd.includes(' && '));
     assert.ok(!cmd.includes(' || '));
     assert.ok(cmd.includes('Write-Output "' + MARKER + ':1"'));
+    assert.ok(cmd.includes('node "$HOME/.t3/t3-companion/runner/bin/companion-control.cjs"'));
   }
 });
