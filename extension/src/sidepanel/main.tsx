@@ -10,11 +10,16 @@ import { cacheKey, defaultPreferences, loadPreferences, parseCache, persistPrefe
 import '../shared/styles.css';
 import './sidepanel.css';
 
-type Status = 'todo' | 'in_progress' | 'review' | 'done';
+type Status = 'todo' | 'in_progress' | 'review' | 'awaiting_merge' | 'done';
 type Task = { id: string; title: string; description?: string; prompt: string; status: Status; statusOverride?: boolean; priority?: number;
   executionRequests?: { requestId: string; notBefore?: string; worktree?: string; workspace?: WorkspaceMode }[] };
 type Tasks = { version: 1; tasks: Task[] };
-type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
+type Runtime = { version: 1; requests: Record<string, {
+  taskId: string; status: string; threadId?: string | null; error?: string | null;
+  startedAt?: string; finishedAt?: string; workflowStage?: 'in_progress' | 'human_review' | 'awaiting_merge' | 'done';
+  pendingRequestCount?: number; changeRequests?: {url: string; state: 'open' | 'closed' | 'merged' | 'unknown'}[];
+  lastInspectedAt?: string;
+}> };
 type Page = 'kanban' | 'overview';
 // Compact when either the panel is narrow or a tiled window is short.
 // Keep this exact media query in sync with the CSS rules in sidepanel.css.
@@ -34,7 +39,7 @@ function useCompactBoard(): boolean {
 
 const columns: { key: Status; name: string }[] = [
   { key: 'todo', name: 'To Do' }, { key: 'in_progress', name: 'In Progress' },
-  { key: 'review', name: 'Review' }, { key: 'done', name: 'Done' },
+  { key: 'review', name: 'Human Review' }, { key: 'awaiting_merge', name: 'Awaiting Merge' }, { key: 'done', name: 'Done' },
 ];
 const emptyTasks = (): Tasks => ({ version: 1, tasks: [] });
 const emptyRuntime = (): Runtime => ({ version: 1, requests: {} });
@@ -77,6 +82,7 @@ function App() {
         todo: stored.expandedLanes.todo !== false,
         in_progress: stored.expandedLanes.in_progress !== false,
         review: stored.expandedLanes.review !== false,
+        awaiting_merge: stored.expandedLanes.awaiting_merge !== false,
         done: stored.expandedLanes.done === true,
       });
     }).catch(() => {}).finally(() => { if (live) setPreferencesReady(true); });
@@ -87,7 +93,7 @@ function App() {
   }, [preferencesReady, preferences]);
   const compactBoard = useCompactBoard();
   const [expandedLanes, setExpandedLanes] = useState<Record<Status, boolean>>({
-    todo: true, in_progress: true, review: true, done: false,
+    todo: true, in_progress: true, review: true, awaiting_merge: true, done: false,
   });
   const [tabId, setTabId] = useState<number | null>(null);
   const [tabUrl, setTabUrl] = useState('');
@@ -575,8 +581,13 @@ function App() {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
   };
   const taskColumn = (task: Task): Status => {
-    if (task.statusOverride || task.status === 'done' || task.status === 'review') return task.status;
-    const status = taskExecution(task)?.status;
+    if (task.statusOverride || task.status === 'done' || task.status === 'review' || task.status === 'awaiting_merge') return task.status;
+    const execution = taskExecution(task);
+    if (execution?.workflowStage === 'done') return 'done';
+    if (execution?.workflowStage === 'awaiting_merge') return 'awaiting_merge';
+    if (execution?.workflowStage === 'human_review') return 'review';
+    if (execution?.workflowStage === 'in_progress') return 'in_progress';
+    const status = execution?.status;
     if (status === 'dispatching') return 'in_progress';
     if (status === 'completed' || status === 'blocked' || status === 'failed' || status === 'needs_reconciliation')
       return 'review';
@@ -767,6 +778,7 @@ function App() {
               {laneTasks.map(task => {
                 const execution = taskExecution(task);
                 const queued = task.executionRequests?.length && !execution;
+                const latestRequest = execution?.changeRequests?.[0];
                 return <article className={'task-card' + (dragTaskId === task.id ? ' task-dragging' : '')} key={task.id}
                   onDragOver={event => { if (dragTaskId) { event.preventDefault(); event.stopPropagation(); setDragTarget(column.key); } }}
                   onDrop={event => dropTask(event, column.key, task.id)}>
@@ -778,7 +790,11 @@ function App() {
                     {task.description && <span className="task-description">{task.description}</span>}
                     <span className="task-meta">
                       <span className="priority-label">P{task.priority || 2}</span>
-                      {(execution || queued) && <span className={'execution-status ' + (execution?.status || 'queued')}>{execution?.status?.replaceAll('_', ' ') || 'queued'}</span>}
+                      {(execution || queued) && <span className={'execution-status ' + (execution?.workflowStage || execution?.status || 'queued')}>
+                        {execution?.workflowStage === 'human_review' ? 'Needs input / review'
+                          : execution?.workflowStage?.replaceAll('_', ' ') || execution?.status?.replaceAll('_', ' ') || 'queued'}
+                      </span>}
+                      {latestRequest && <span className="linked-label" title={latestRequest.url}>{latestRequest.state === 'merged' ? 'Merged' : latestRequest.state === 'open' ? 'PR/MR open' : 'PR/MR linked'}</span>}
                       {taskLinkedThread(task) && <span className="linked-label" title="Linked T3 thread">Thread linked</span>}
                     </span>
                   </button>
@@ -1054,7 +1070,12 @@ function App() {
           {detailsTask && taskRequests(detailsTask).map(({ request, execution }) => (
             <div className="request-row" key={request.requestId}>
               <div className="request-info">
-                <span className="execution-status">{execution?.status?.replaceAll('_', ' ') || (request.notBefore ? 'scheduled / queued' : 'queued')}</span>
+                <span className="execution-status">{execution?.workflowStage === 'human_review' ? 'Human review'
+                  : execution?.workflowStage?.replaceAll('_', ' ') || execution?.status?.replaceAll('_', ' ') || (request.notBefore ? 'scheduled / queued' : 'queued')}</span>
+                {execution?.pendingRequestCount ? <span className="request-error">Waiting for {execution.pendingRequestCount} answer(s) in T3</span> : null}
+                {execution?.changeRequests?.map(pr => <a key={pr.url} href={pr.url} target="_blank" rel="noopener noreferrer">
+                  {pr.url} · {pr.state}
+                </a>)}
                 {request.worktree && <span className="muted">Worktree: {request.worktree}</span>}
                 {request.notBefore && <span className="muted">Not before: {new Date(request.notBefore).toLocaleString()}</span>}
                 {execution?.error && <span className="request-error">{execution.error}</span>}
@@ -1086,7 +1107,7 @@ function App() {
         <label>Agent Prompt <span className="optional-label">Sent to T3; separate from task title</span><textarea rows={7} placeholder="Tell the coding agent what to investigate, change and verify…" value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })}/></label>
         <div className="field-pair">
           <label>Priority<select value={draft.priority ?? 2} onChange={e => setDraft({ ...draft, priority: Number(e.target.value) })}><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></label>
-          <label>Status<select value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value as Status })}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label>
+          <label>Status<select value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value as Status, statusOverride: true })}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label>
         </div>
       </div>
       <div className="modal-actions"><button onClick={() => setEditing(null)}>Cancel</button>
