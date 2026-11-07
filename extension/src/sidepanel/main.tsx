@@ -56,6 +56,7 @@ function App() {
   preferencesRef.current = preferences;
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [runnerCacheAt, setRunnerCacheAt] = useState<number | null>(null);
+  const [runnerStatusError, setRunnerStatusError] = useState('');
   const [skillCacheAt, setSkillCacheAt] = useState<number | null>(null);
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<Status | null>(null);
@@ -125,6 +126,8 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('auto');
   const [queueAdvancedOpen, setQueueAdvancedOpen] = useState(false);
   const [runnerResult, setRunnerResult] = useState('Not checked');
+  const runnerResultRef = useRef(runnerResult);
+  runnerResultRef.current = runnerResult;
   const [skillState, setSkillState] = useState<'checking' | 'installed' | 'not_installed' | 'unavailable' | 'error'>('checking');
   const [skillBusy, setSkillBusy] = useState(false);
   const [skillError, setSkillError] = useState('');
@@ -157,8 +160,8 @@ function App() {
     const key = cacheKey('runner', environmentId);
     void chrome.storage.local.get(key).then(data => {
       const cached = parseCache<string>(data[key], (v): v is string => typeof v === 'string' && v.startsWith('{'));
-      if (live && cached) {
-        setRunnerResult(current => current === 'Not checked' ? cached.value : current);
+      if (live && cached && runnerResultRef.current === 'Not checked') {
+        setRunnerResult(cached.value);
         setRunnerCacheAt(cached.verifiedAt);
       }
     }).catch(() => {});
@@ -169,6 +172,9 @@ function App() {
     let live = true;
     const key = cacheKey('skill', environmentId, currentProject.workspaceRoot);
     setSkillCacheAt(null);
+    setSkillState('checking');
+    setSkillError('');
+    skillCheckedProject.current = '';
     void chrome.storage.local.get(key).then(data => {
       const cached = parseCache<'installed' | 'not_installed'>(data[key],
         (v): v is 'installed' | 'not_installed' => v === 'installed' || v === 'not_installed');
@@ -290,7 +296,7 @@ function App() {
         manualProject.current = Boolean(preferencesRef.current.projectByEnvironment[descriptor.environmentId]);
         setProjects([]); setThreads([]); setProjectId('');
         setTasks(emptyTasks()); setRuntime(emptyRuntime()); setRunnerCacheAt(null); setSkillCacheAt(null);
-        setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setNotice('');
+        setDetailsTaskId(null); setEditing(null); setQueueTarget(null); setRunnerResult('Not checked'); setRunnerStatusError(''); setNotice('');
       }
       selectedTabRef.current = tab.id;
       if (tab.windowId !== undefined) {
@@ -389,6 +395,7 @@ function App() {
         if (!active || scopedKey.current !== scope) return;
         const status = JSON.parse(output) as { installed?: boolean; running?: boolean; bridgeMissing?: boolean };
         setRunnerCacheAt(null);
+        setRunnerStatusError('');
         void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: output, verifiedAt: Date.now() } });
         if (status.installed && !status.bridgeMissing && !status.running && enabled && runnerAutoStartRef.current) {
           const started = await runnerCommand(tabId, environmentId, runnerHostProject, runnerHost.id, 'start');
@@ -400,8 +407,10 @@ function App() {
           setRunnerResult(output);
         }
       } catch (error) {
-        if (active && scopedKey.current === scope)
-          setRunnerResult('Runner check failed: ' + String(error));
+        if (active && scopedKey.current === scope) {
+          setRunnerStatusError(String(error));
+          setRunnerResult(current => current.startsWith('{') ? current : 'Runner check failed: ' + String(error));
+        }
       } finally {
         runnerActionInFlight.current = false;
       }
@@ -434,7 +443,8 @@ function App() {
       .catch(error => {
         if (active && scopedKey.current === key && projectSelectionRef.current === projectId) {
           skillCheckedProject.current = projectKey;
-          setSkillState('error'); setSkillError(String(error));
+          setSkillState(current => current === 'installed' || current === 'not_installed' ? current : 'error');
+          setSkillError(String(error));
         }
       });
     return () => { active = false; };
@@ -588,12 +598,15 @@ function App() {
       const result = await runnerCommand(tabId, environmentId, hostProject, host.id, verb,
         ['add', 'remove'].includes(verb) ? currentProject.workspaceRoot : undefined);
       if (scopedKey.current === key) {
-        setRunnerResult(result); setRunnerCacheAt(null);
+        setRunnerResult(result); setRunnerCacheAt(null); setRunnerStatusError('');
         void chrome.storage.local.set({ [cacheKey('runner', environmentId)]: { value: result, verifiedAt: Date.now() } });
         if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
     } catch (err) {
-      if (scopedKey.current === key) setRunnerResult('Runner check failed: ' + String(err));
+      if (scopedKey.current === key) {
+        setRunnerStatusError(String(err));
+        setRunnerResult(current => current.startsWith('{') ? current : 'Runner check failed: ' + String(err));
+      }
       throw err;
     } finally {
       runnerActionInFlight.current = false;
@@ -846,7 +859,7 @@ function App() {
           <div className="overview-expander-body">
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
-        {runnerError && <p className="runner-error" role="alert">{runnerError}</p>}
+        {(runnerStatusError || runnerError) && <p className="runner-error" role="alert">Could not verify Runner: {runnerStatusError || runnerError}{runnerCacheAt ? ' (showing last known status)' : ''}</p>}
         {runnerInstalled === 'true' && <p className="runner-hint">Version: {runnerVersion ? runnerVersion.slice(0, 10) : 'Legacy · not recorded'}{runnerCacheAt ? ' · Last verified ' + new Date(runnerCacheAt).toLocaleTimeString() : ''}</p>}
         <div className="runner-toolbar">
           {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
