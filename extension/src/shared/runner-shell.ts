@@ -5,8 +5,12 @@
  * readable, with no eval, base64-encoded programs, or shell-specific syntax.
  */
 export type RunnerVerb = 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove' | 'configure';
-export const RUNNER_SOURCE_REF = 'main';
-export const CONTROL_SOURCE_REF = 'main';
+// Vite replaces this with the immutable source commit used for the built extension.
+// Plain Node tests run without Vite and exercise the safe release-channel fallback.
+declare const __T3_COMPANION_SOURCE_REF__: string;
+export const RUNNER_SOURCE_REF =
+  typeof __T3_COMPANION_SOURCE_REF__ !== 'undefined' ? __T3_COMPANION_SOURCE_REF__ : 'main';
+export const CONTROL_SOURCE_REF = RUNNER_SOURCE_REF;
 
 const CONTROL_URL = 'https://raw.githubusercontent.com/truong51972/t3-companion/' +
   CONTROL_SOURCE_REF + '/runner/bin/companion-control.cjs';
@@ -43,8 +47,10 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
   if ((verb === 'add' || verb === 'remove') && !target) throw new Error('Project path required');
   if (verb === 'configure' && !/^[1-3]$/.test(target || '')) throw new Error('Max concurrent must be 1..3');
-  const args = [verb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
-  return 'node -e "' + (['install', 'update', 'reinstall'].includes(verb) ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
+  const upgrades = ['install', 'update', 'reinstall'].includes(verb);
+  const args = [verb, marker, ...(target === undefined ? [] : [encodeTarget(target)]),
+    ...(upgrades ? [RUNNER_SOURCE_REF] : [])];
+  return 'node -e "' + (upgrades ? INSTALL_SCRIPT : verb === 'status' ? CONTROL_SCRIPT : DIRECT_SCRIPT) + '" -- ' + args.join(' ');
 }
 
 /** A PTY Enter key sends CR; LF is Ctrl+J in terminal raw mode (not Enter on PowerShell). */
