@@ -87,6 +87,16 @@ export function TaskCard({
         {task.description && <span className="task-description">{task.description}</span>}
         <span className="task-meta">
           <span className="priority-label">P{task.priority || 2}</span>
+          {task.execution?.modelSelection && (
+            <span className="task-config-label" title={task.execution.modelSelection.instanceId}>
+              {task.execution.modelSelection.model}
+            </span>
+          )}
+          {task.execution && (
+            <span className="task-config-label" title={task.execution.baseRef || ''}>
+              {task.execution.workspace === 'root' ? 'Checkout' : 'Worktree'}
+            </span>
+          )}
           {(execution || queued) && (
             <span
               className={
