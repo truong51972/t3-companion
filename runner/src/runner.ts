@@ -149,8 +149,11 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
   async function reconcile(project: string) {
     if (!inspectThread) return;
     const snapshot = await readRuntime(project);
+    const tasks = await readTasks(project);
+    const currentRequestIds = new Set(tasks.tasks.map(task => task.executionRequests?.at(-1)?.requestId).filter(Boolean));
     const now = Date.now();
     const items = Object.entries(snapshot.requests)
+      .filter(([id]) => currentRequestIds.has(id))
       .filter(([, entry]) => Boolean(entry.threadId) &&
         ['dispatching', 'completed', 'blocked', 'failed', 'needs_reconciliation'].includes(entry.status) &&
         entry.workflowStage !== 'done' &&
@@ -204,7 +207,7 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
       const poolLimit = concurrency ?? settings.maxConcurrent;
       const cycleMs = intervalMs ?? settings.scanIntervalMs;
       for (const project of await listProjects(home)) {
-        if (stopping || active.size >= poolLimit) break;
+        if (stopping) break; // PR/input reconciliation continues while the pool is full
         try {
           const tasks = await readTasks(project); const runtime = await readRuntime(project);
           for (const task of tasks.tasks) for (const request of task.executionRequests || []) {
