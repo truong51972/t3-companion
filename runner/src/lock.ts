@@ -39,7 +39,9 @@ export async function acquire(home: string) {
     await fs.rm(stale, { recursive: true });
     await fs.mkdir(dir);
   }
-  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
+  // Identify which checkout owns this PID, so migrations do not stop a new worker twice.
+  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(),
+    entry: process.argv[1] ? path.resolve(process.argv[1]) : null };
   await fs.writeFile(path.join(dir, 'owner.json'), JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
   return owner;
 }

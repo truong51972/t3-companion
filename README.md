@@ -39,7 +39,7 @@ Runner needs Node.js **22.16+** and a **T3 Code CLI executable on the selected e
 
 1. Open a T3 thread in the environment and select the project in Companion.
 2. Open **Overview → Runner** (collapsed by default). The Side Panel checks its status automatically after the initial UI render. Expand Runner for Start and Refresh; Stop and maintenance commands are under **More**.
-3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/.t3/t3-companion/` on the selected execution host and starts the bundled Runner. Existing registered projects, tasks and runtime history are preserved under `~/.t3/runner/`. Legacy installs show **Setup required**; choose **Set up controls** to migrate without deleting the previous installation.
+3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/t3-companion/` on the selected execution host and starts the bundled Runner. Existing registered projects, tasks and runtime history are preserved under `~/.t3/runner/`. Legacy installs (including the prior Git checkout in `~/.t3/t3-companion`) show **Setup required**; choose **Set up controls** to clone into the new location and migrate without deleting the previous installation.
 4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
 Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
@@ -129,13 +129,13 @@ are read-only; neither will checkout or delete a branch.
 
 ## Git-managed Runner installation
 
-The standalone Runner code now lives in `~/.t3/t3-companion`.
+The standalone Runner code now lives in `~/t3-companion`.
 Installation and updating use regular Git operations rather than downloading
 individual JavaScript files.
 
 ```sh
-git clone https://github.com/truong51972/t3-companion.git ~/.t3/t3-companion
-git -C ~/.t3/t3-companion pull --ff-only
+git clone https://github.com/truong51972/t3-companion.git ~/t3-companion
+git -C ~/t3-companion pull --ff-only
 ```
 
 **Overview → Install & Start** clones the repository then starts the Runner.
@@ -146,11 +146,11 @@ Manual Git pulls should be performed only while Runner is stopped.
 
 Durable state still lives in `~/.t3/runner/`: `projects.json`,
 `config.json`, logs, lock and heartbeat. Project `.t3/tasks.json` and
-`.t3/runtime.json` are unchanged. Legacy `~/.t3/companion/runner` installs
+`.t3/runtime.json` are unchanged. Legacy `~/.t3/companion/runner` and `~/.t3/t3-companion` installs
 are detected for migration; the old executable files are not deleted.
 
 Git and Node.js 22.16+ must be available on the selected T3 execution host.
 
 **Windows note:** The extension uses T3's environment platform to choose
-PowerShell-safe Git paths (`"$HOME/.t3/t3-companion"`) rather than sending
+PowerShell-safe Git paths (`"$HOME/t3-companion"`) rather than sending
 POSIX `~` paths to native Git. No browser OS inference is used.

@@ -6,6 +6,7 @@ const [verb,marker,encodedTarget]=process.argv.slice(2);
 const checkout=path.resolve(__dirname,'..','..');
 const entry=path.join(checkout,'runner','bin','t3-runner.mjs');
 const legacyEntry=path.join(os.homedir(),'.t3','companion','runner','bin','t3-runner.mjs');
+const previousCheckoutEntry=path.join(os.homedir(),'.t3','t3-companion','runner','bin','t3-runner.mjs');
 const home=path.resolve(process.env.T3_COMPANION_HOME||
   path.join(process.env.T3CODE_HOME||path.join(os.homedir(),'.t3'),'runner'));
 const required=['runner/bin/t3-runner.mjs','runner/src/cli.ts','runner/src/runner.ts',
@@ -53,6 +54,8 @@ function target(){
 }
 function sleep(ms){Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}
 function start(){
+  // Before reusing an existing PID, ensure it is not a worker from the old checkout.
+  migrateLegacy();
   if(lockStatus().running)return state();
   try{run('start')}catch(e){
     if(/T3 CLI not found|T3 CLI executable|T3_COMPANION_T3_BIN/i.test(String(e)))
@@ -62,17 +65,28 @@ function start(){
   sleep(300);return state();
 }
 function migrateLegacy(){
-  if(!fs.existsSync(legacyEntry)||!lockStatus().running)return;
+  if(!lockStatus().running ||
+    (!fs.existsSync(legacyEntry) && !fs.existsSync(previousCheckoutEntry)))return;
+  // New workers carry their entry path in the lock. Old workers do not.
+  // This prevents repeatedly draining the new worker when old code is retained.
+  let owner;
+  try { owner=JSON.parse(fs.readFileSync(path.join(home,'runner.lock','owner.json'),'utf8')); }
+  catch(e) { throw Error('Cannot inspect active Runner before migration: '+String(e)); }
+  if(typeof owner.entry==='string'){
+    const current=path.resolve(owner.entry).toLowerCase();
+    const installedRoot=(checkout+path.sep).toLowerCase();
+    if(current.startsWith(installedRoot))return;
+  }
   // Drains the old worker using the common ~/.t3/runner stop flag.
   run('stop');
   for(let i=0;i<60;i++){if(!lockStatus().running)return;sleep(500)}
-  throw Error('Legacy Runner is still draining tasks; retry after it stops');
+  throw Error('Previous Runner is still draining tasks; retry after it stops');
 }
 function main(){
   if(!/^COMPANION_[a-f0-9]{32}$/.test(marker))throw Error('Invalid completion marker');
   if(!['install','status','start','stop','add','remove','inspect','configure'].includes(verb))
     throw Error('Unknown Runner operation');
-  if(verb==='install'){migrateLegacy();return start()}
+  if(verb==='install')return start();
   if(verb==='status')return state();
   if(verb==='start')return start();
   if(verb==='stop')return state({stopRequested:run('stop').requested});

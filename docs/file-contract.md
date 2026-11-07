@@ -50,7 +50,7 @@ Clear Browser Data in Overview clears Companion-owned local and session storage,
 
 ## Upgrade lifecycle
 
-The Runner controller resolves a single trusted repository commit SHA and downloads all executable files from that commit, drains running jobs, and rolls back files and version metadata if replacement/restart fails. Registry, task history and worktrees are preserved. Agent Skill Update uses `npx skills update t3-companion -p -y`; Re-install uses project-scoped `npx skills add`.
+The Runner's source is a Git checkout in `~/t3-companion`. An update checks for a clean working tree and trusted origin, drains any running jobs, performs `git pull --ff-only`, then restarts if needed. No remote JavaScript downloader or forced Git reset is used. Registry, task history and worktrees are preserved. Agent Skill Update uses `npx skills update t3-companion -p -y`; Re-install uses project-scoped `npx skills add`.
 
 ## Runner settings
 
@@ -73,8 +73,8 @@ This file is diagnostics-only and must never be treated as authority for task co
 
 ## Git checkout and compatibility
 
-The install at `~/.t3/t3-companion` is Git-managed, with source code only.
+The install at `~/t3-companion` is Git-managed, with source code only.
 It must not contain Runner's durable state. Updates use `git pull --ff-only`,
 with Runner drain/restart coordinated by the extension. State is retained in
-`~/.t3/runner`; legacy source at `~/.t3/companion/runner` is left intact
+`~/.t3/runner`; legacy source at `~/.t3/companion/runner` or `~/.t3/t3-companion` is left intact
 after migration for safety.

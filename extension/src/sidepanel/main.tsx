@@ -1112,7 +1112,7 @@ function App() {
             setConfirmation({
               title: 'Refresh Runner checkout?',
               description:
-                'Runner will drain active tasks, run git pull --ff-only in ~/.t3/t3-companion, and restart if it was running. Local changes are never reset; projects and task history are preserved.',
+                'Runner will drain active tasks, run git pull --ff-only in ~/t3-companion, and restart if it was running. Local changes are never reset; projects and task history are preserved.',
               confirmLabel: 'Pull updates',
               run: async () => manageRunner('reinstall'),
             });

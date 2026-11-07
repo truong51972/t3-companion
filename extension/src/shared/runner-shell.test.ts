@@ -12,7 +12,7 @@ const MARKER = 'COMPANION_' + 'a'.repeat(32);
 test('install is a plain git clone, not a remote JavaScript downloader', () => {
   const command = runnerShellCommand('install', undefined, MARKER);
   assert.ok(command.startsWith('git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT));
-  assert.ok(command.includes(' && node ~/.t3/t3-companion/runner/bin/companion-control.cjs install '),
+  assert.ok(command.includes(' && node ~/t3-companion/runner/bin/companion-control.cjs install '),
     'the installed controller starts only after a successful clone');
   assert.ok(command.endsWith(' || echo ' + MARKER + ':1'));
   assert.doesNotMatch(command, /node -e|raw\.githubusercontent|fetch\(|curl |wget |git reset|eval\(/);
@@ -86,6 +86,25 @@ test('legacy file-copy install is recognized for a one-time Git migration', () =
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test('previous Git checkout is detected for migration to ~/t3-companion', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-old-git-'));
+  try {
+    const oldEntry = path.join(home, '.t3', 't3-companion', 'runner', 'bin', 't3-runner.mjs');
+    mkdirSync(path.dirname(oldEntry), { recursive: true });
+    writeFileSync(oldEntry, '// old executable');
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const source = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    const result = child.stdout.match(/T3_COMPANION_RESULT:(\\{[^\\r\\n]+\\})/);
+    assert.ok(result, child.stdout);
+    assert.equal(JSON.parse(result[1]).bridgeMissing, true);
+    assert.equal(JSON.parse(result[1]).upgradeRequired, true);
+    assert.equal(JSON.parse(result[1]).installed, true);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test('missing controller fails clearly instead of a T3 RPC timeout', () => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'companion-missing-'));
   try {
@@ -125,13 +144,13 @@ test('PTY submit and terminal output normalization retain response markers', () 
 test('Windows Git operations use a PowerShell-safe home path, not native tilde', () => {
   const install = runnerShellCommand('install', undefined, MARKER, 'windows');
   const update = runnerShellCommand('update', undefined, MARKER, 'windows');
-  assert.ok(install.startsWith('git clone ' + RUNNER_REPOSITORY + ' "$HOME/.t3/t3-companion"'));
-  assert.ok(update.startsWith('git -C "$HOME/.t3/t3-companion" pull --ff-only'));
+  assert.ok(install.startsWith('git clone ' + RUNNER_REPOSITORY + ' "$HOME/t3-companion"'));
+  assert.ok(update.startsWith('git -C "$HOME/t3-companion" pull --ff-only'));
   for (const cmd of [install, update]) {
     assert.ok(cmd.includes('if ($LASTEXITCODE -eq 0)'));
     assert.ok(!cmd.includes(' && '));
     assert.ok(!cmd.includes(' || '));
     assert.ok(cmd.includes('Write-Output "' + MARKER + ':1"'));
-    assert.ok(cmd.includes('node "$HOME/.t3/t3-companion/runner/bin/companion-control.cjs"'));
+    assert.ok(cmd.includes('node "$HOME/t3-companion/runner/bin/companion-control.cjs"'));
   }
 });

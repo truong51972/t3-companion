@@ -12,7 +12,7 @@ function git(cwd, ...args) {
 function fixture(t) {
   const home = mkdtempSync(path.join(os.tmpdir(), 't3-companion-controller-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  const root = path.join(home, '.t3', 't3-companion');
+  const root = path.join(home, 't3-companion');
   const control = path.join(root, 'runner', 'bin', 'companion-control.cjs');
   const src = path.resolve(import.meta.dirname, '../bin/companion-control.cjs');
   mkdirSync(path.dirname(control), { recursive: true });

@@ -14,14 +14,17 @@ test('Git checkout updates only code, preserving legacy files and durable Runner
   const home = mkdtempSync(path.join(os.tmpdir(), 't3-companion-git-install-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const source = path.join(home, 'upstream repo');
-  const checkout = path.join(home, '.t3', 't3-companion');
+  const checkout = path.join(home, 't3-companion');
   const stateFile = path.join(home, '.t3', 'runner', 'projects.json');
   const legacyFile = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
+  const previousGitFile = path.join(home, '.t3', 't3-companion', 'README.md');
   mkdirSync(source, { recursive: true });
   mkdirSync(path.dirname(stateFile), { recursive: true });
   mkdirSync(path.dirname(legacyFile), { recursive: true });
+  mkdirSync(path.dirname(previousGitFile), { recursive: true });
   writeFileSync(stateFile, '{"projects":["/example/project"]}\n');
   writeFileSync(legacyFile, 'legacy binary');
+  writeFileSync(previousGitFile, 'previous checkout stays untouched');
   git('init', source);
   git('-C', source, 'config', 'user.email', 'test@example.invalid');
   git('-C', source, 'config', 'user.name', 'Companion Test');
@@ -42,6 +45,7 @@ test('Git checkout updates only code, preserving legacy files and durable Runner
   assert.equal(readFileSync(path.join(checkout, 'README.md'), 'utf8').replace(/\r\n/g, '\n'), 'updated\n');
   assert.equal(readFileSync(stateFile, 'utf8'), '{"projects":["/example/project"]}\n');
   assert.equal(readFileSync(legacyFile, 'utf8'), 'legacy binary');
+  assert.equal(readFileSync(previousGitFile, 'utf8'), 'previous checkout stays untouched');
 });
 
 /** A dirty checkout must not be silently reset, even if a new commit exists upstream. */
@@ -49,7 +53,7 @@ test('Git pull --ff-only refuses conflicting local edits without destroying stat
   const home = mkdtempSync(path.join(os.tmpdir(), 't3-companion-git-dirty-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const source = path.join(home, 'source');
-  const checkout = path.join(home, '.t3', 't3-companion');
+  const checkout = path.join(home, 't3-companion');
   mkdirSync(source, { recursive: true });
   git('init', source);
   git('-C', source, 'config', 'user.email', 'test@example.invalid');
