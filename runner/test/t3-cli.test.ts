@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { findT3Cli, requireT3Cli } from '../src/t3-cli.ts';
 
@@ -61,7 +62,7 @@ test('CLI preflight refuses to claim any task if T3 executable is missing', asyn
   const runnerHome = path.join(home, 'runner');
   const cli = new URL('../src/cli.ts', import.meta.url);
   const child = spawnSync(process.execPath,
-    ['--experimental-strip-types', cli.pathname, 'run', '--once'], {
+    ['--experimental-strip-types', fileURLToPath(cli), 'run', '--once'], {
       env: { ...process.env, HOME: home, USERPROFILE: home, PATH: '',
         T3_COMPANION_HOME: runnerHome, T3_COMPANION_T3_BIN: '' },
       encoding: 'utf8', timeout: 10000,
