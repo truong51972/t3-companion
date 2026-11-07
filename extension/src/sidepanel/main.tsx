@@ -7,6 +7,7 @@ import { selectT3Tab } from '../shared/tab-selection';
 import type { Project, Thread } from '../bridge/t3-bridge';
 import type { SessionEnvironment } from '../bridge/page-session';
 import { cacheKey, defaultPreferences, loadPreferences, parseCache, persistPreferences, scopeKey, type CompanionPreferences, type WorkspaceMode } from '../shared/preferences';
+import { insertionHint, moveBoardItem, type DragDropHint } from '../shared/board-move';
 import '../shared/styles.css';
 import './sidepanel.css';
 
@@ -106,6 +107,11 @@ function App() {
   const [skillCacheAt, setSkillCacheAt] = useState<number | null>(null);
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<Status | null>(null);
+  const [dropHint, setDropHint] = useState<DragDropHint | null>(null);
+  const [dragPreview, setDragPreview] = useState<{title: string; x: number; y: number} | null>(null);
+  const pointerDrag = useRef<{pointerId: number; taskId: string; startedX: number; startedY: number; active: boolean;
+    scope: string; projectId: string; cleanup: () => void} | null>(null);
+  const suppressDraggedClick = useRef<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     title: string; description: string; confirmLabel: string; run: () => Promise<void>; dangerous?: boolean;
@@ -158,6 +164,8 @@ function App() {
   const projectSelectionRef = useRef(projectId);
   projectSelectionRef.current = projectId;
   const [tasks, setTasks] = useState<Tasks>(emptyTasks());
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const [runtime, setRuntime] = useState<Runtime>(emptyRuntime());
   const [editing, setEditing] = useState<Task | null>(null);
   const [queueTarget, setQueueTarget] = useState<Task | null>(null);
@@ -664,27 +672,124 @@ function App() {
   }
   function openTask(task: Task) { setDetailsTaskId(task.id); }
   async function moveTask(task: Task, status: Status, beforeTaskId?: string) {
-    if (beforeTaskId === task.id) return;
-    await mutateTask(task.id, document => {
-      const updated = { ...task, status, statusOverride: true };
-      const remaining = document.tasks.filter(t => t.id !== task.id);
-      const at = beforeTaskId ? remaining.findIndex(t => t.id === beforeTaskId) : -1;
-      remaining.splice(at === -1 ? remaining.length : at, 0, updated);
-      return { ...document, tasks: remaining };
-    }, task);
+    if (beforeTaskId === task.id && taskColumn(task) === status) return;
+    await mutateTask(task.id, document => ({
+      ...document,
+      tasks: moveBoardItem(document.tasks, task.id, status, beforeTaskId, taskColumn),
+    }), task);
   }
-  function beginTaskDrag(event: React.DragEvent, taskId: string) {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', taskId);
-    setDragTaskId(taskId);
+
+  /** Target detection uses rendered lanes (which may differ from task.status
+   * while Runner projects in-progress/review state). It also accepts empty or
+   * collapsed lanes so an item can always be moved to Done or another status.
+   */
+  function pointerDropHint(x: number, y: number): DragDropHint | null {
+    const hit = document.elementFromPoint(x, y);
+    if (!(hit instanceof Element)) return null;
+    const lane = hit.closest<HTMLElement>('.board .lane[data-lane-status]');
+    const status = lane?.dataset.laneStatus;
+    if (!lane || !status || !columns.some(column => column.key === status)) return null;
+    const card = hit.closest<HTMLElement>('.task-card[data-task-id]');
+    if (!card || !lane.contains(card) || !card.dataset.taskId) return { lane: status };
+    const visibleCards = Array.from(lane.querySelectorAll<HTMLElement>('.task-card[data-task-id]'));
+    const position = visibleCards.indexOf(card);
+    const nextTaskId = visibleCards[position + 1]?.dataset.taskId;
+    const rect = card.getBoundingClientRect();
+    return {
+      lane: status,
+      ...insertionHint(card.dataset.taskId, y, rect.top + rect.height / 2, nextTaskId),
+    };
   }
-  function dropTask(event: React.DragEvent, status: Status, beforeTaskId?: string) {
-    event.preventDefault(); event.stopPropagation();
-    const taskId = dragTaskId || event.dataTransfer.getData('text/plain');
-    setDragTaskId(null); setDragTarget(null);
-    const task = tasks.tasks.find(item => item.id === taskId);
-    if (task) void action(() => moveTask(task, status, beforeTaskId));
+
+  /** Use Pointer Events rather than HTML5 draggable. This works for Edge side
+   * panels, mouse/pen and touch via the grip, with no external DnD dependency.
+   * Non-drag taps keep the normal Open Details action.
+   */
+  function beginTaskPointer(event: React.PointerEvent<HTMLElement>, taskId: string) {
+    if (busy || !event.isPrimary || event.button !== 0 || pointerDrag.current) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('input,textarea,select,a,summary,details,.queue-button')) return;
+    if (target.closest('button:not(.task-open):not(.drag-handle)')) return;
+    if (event.pointerType === 'touch' && !target.closest('.drag-handle')) return;
+    const task = tasksRef.current.tasks.find(item => item.id === taskId);
+    if (!task) return;
+    const session = {
+      pointerId: event.pointerId, taskId, startedX: event.clientX, startedY: event.clientY,
+      active: false, scope: scopedKey.current, projectId: projectSelectionRef.current,
+      cleanup: () => {},
+    };
+
+    const clear = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      if (pointerDrag.current === session) pointerDrag.current = null;
+      document.body.classList.remove('board-pointer-dragging');
+      setDragTaskId(null); setDragTarget(null); setDropHint(null); setDragPreview(null);
+    };
+    session.cleanup = clear;
+
+    const onMove = (move: PointerEvent) => {
+      if (move.pointerId !== session.pointerId) return;
+      if (!session.active && Math.hypot(move.clientX - session.startedX, move.clientY - session.startedY) < 7) return;
+      if (!session.active) {
+        session.active = true;
+        document.body.classList.add('board-pointer-dragging');
+        setDragTaskId(taskId);
+      }
+      move.preventDefault();
+      const hint = pointerDropHint(move.clientX, move.clientY);
+      setDropHint(hint);
+      setDragTarget(current => current === (hint?.lane || null) ? current : hint?.lane as Status || null);
+      setDragPreview({ title: task.title, x: move.clientX, y: move.clientY });
+
+      // Auto-scroll for both compact one-scroll boards and wide, independently
+      // scrolling lanes, so offscreen columns/cards stay reachable.
+      const scrollSurface = (document.elementFromPoint(move.clientX, move.clientY) as Element | null)
+        ?.closest<HTMLElement>('.lane-body');
+      const boardScroll = document.querySelector<HTMLElement>('.kanban-view .board-scroll');
+      const scrollArea = scrollSurface && scrollSurface.scrollHeight > scrollSurface.clientHeight + 4
+        ? scrollSurface : boardScroll;
+      if (scrollArea) {
+        const rect = scrollArea.getBoundingClientRect();
+        const speed = move.clientY < rect.top + 34 ? -16 : move.clientY > rect.bottom - 34 ? 16 : 0;
+        if (speed) scrollArea.scrollBy(0, speed);
+      }
+    };
+    const onEnd = (up: PointerEvent) => {
+      if (up.pointerId !== session.pointerId) return;
+      const wasDragging = session.active;
+      const hint = wasDragging ? pointerDropHint(up.clientX, up.clientY) : null;
+      clear();
+      if (!wasDragging) return;
+      up.preventDefault();
+      suppressDraggedClick.current = taskId;
+      window.setTimeout(() => { if (suppressDraggedClick.current === taskId) suppressDraggedClick.current = null; }, 300);
+      if (!hint || session.scope !== scopedKey.current || session.projectId !== projectSelectionRef.current) return;
+      const item = tasksRef.current.tasks.find(entry => entry.id === taskId);
+      if (!item) return;
+      const status = hint.lane as Status;
+      if (compactBoard && !expandedLanes[status]) {
+        const expanded = { ...expandedLanes, [status]: true };
+        setExpandedLanes(expanded);
+        setPreferences(previous => ({ ...previous, expandedLanes: expanded }));
+      }
+      void action(() => moveTask(item, status, hint.beforeTaskId));
+    };
+    const onCancel = () => clear();
+    pointerDrag.current = session;
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
   }
+
+  useEffect(() => () => {
+    // A project/environment switch must never dispatch a stale drag.
+    pointerDrag.current?.cleanup();
+  }, [projectId, environmentId, page]);
   async function clearBrowserData() {
     // Chrome extension storage is isolated from T3's site cookies and project files.
     // Clear both durable preferences/caches and ephemeral last-tab selection.
