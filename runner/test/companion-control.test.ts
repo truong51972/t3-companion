@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, copyFileSync, rmSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -105,7 +105,7 @@ test('controller ignores old runtime folders instead of silently importing data'
   assert.equal(started.data.running, true);
   assert.equal(started.data.migrationPending, undefined);
   assert.equal(started.data.legacyRunnerRunning, undefined);
-  assert.equal(started.data.registeredProjects, undefined);
+  assert.equal(existsSync(path.join(root, '.data', 'runner', 'projects.json')), false);
   // The checkout is still clean; manual data migration is a separate operation.
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
