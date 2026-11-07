@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function readSidepanelCode(dir: string): string {
   let content = '';
@@ -14,7 +15,7 @@ function readSidepanelCode(dir: string): string {
 }
 
 const sidepanelCss = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
-const sidepanelCode = readSidepanelCode(new URL('../sidepanel', import.meta.url).pathname);
+const sidepanelCode = readSidepanelCode(fileURLToPath(new URL('../sidepanel', import.meta.url)));
 const popupCss = readFileSync(new URL('../popup/popup.css', import.meta.url), 'utf8');
 
 test('compact Kanban breakpoint agrees between React and CSS for tiled windows', () => {
