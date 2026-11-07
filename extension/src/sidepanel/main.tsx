@@ -655,7 +655,7 @@ function App() {
       ) : (
       <div className="board-scroll">
         <div className="board">{columns.map(column => {
-          const laneTasks = tasks.tasks.filter(t => t.status === column.key).sort((a,b) => (a.priority || 2) - (b.priority || 2));
+          const laneTasks = tasks.tasks.filter(t => t.status === column.key);
           const expanded = !compactBoard || (laneTasks.length > 0 && expandedLanes[column.key]);
           const laneHeading = <>
             <div className="lane-title">
@@ -664,11 +664,18 @@ function App() {
             </div>
             <span className="lane-count">{laneTasks.length}</span>
           </>;
-          return <div className="lane" key={column.key}>
+          return <div className={'lane' + (dragTarget === column.key ? ' lane-drop-target' : '')} key={column.key}
+            onDragOver={event => { if (dragTaskId) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragTarget(column.key); } }}
+            onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragTarget(null); }}
+            onDrop={event => dropTask(event, column.key)}>
             {compactBoard && laneTasks.length > 0 ? (
               <button type="button" className="lane-heading lane-heading-toggle"
                 aria-expanded={expanded} aria-controls={'lane-body-' + column.key}
-                onClick={() => setExpandedLanes(current => ({ ...current, [column.key]: !current[column.key] }))}>
+                onClick={() => setExpandedLanes(current => {
+                  const next = { ...current, [column.key]: !current[column.key] };
+                  setPreferences(p => ({ ...p, expandedLanes: next }));
+                  return next;
+                })}>
                 {laneHeading}
               </button>
             ) : <div className="lane-heading">{laneHeading}</div>}
@@ -677,18 +684,23 @@ function App() {
               {laneTasks.map(task => {
                 const execution = taskExecution(task);
                 const queued = task.executionRequests?.length && !execution;
-                return <article className="task-card" key={task.id}>
-                  <button className="task-open" type="button" aria-label={'Open ' + task.title} onClick={() => void openTask(task)}>
+                return <article className={'task-card' + (dragTaskId === task.id ? ' task-dragging' : '')} key={task.id}
+                  onDragOver={event => { if (dragTaskId) { event.preventDefault(); event.stopPropagation(); setDragTarget(column.key); } }}
+                  onDrop={event => dropTask(event, column.key, task.id)}>
+                  <button type="button" className="drag-handle" draggable aria-label={'Drag ' + task.title}
+                    title="Drag to move or reorder" onDragStart={event => beginTaskDrag(event, task.id)}
+                    onDragEnd={() => { setDragTaskId(null); setDragTarget(null); }}>⠿</button>
+                  <button className="task-open" type="button" aria-label={'View details for ' + task.title} onClick={() => openTask(task)}>
                     <span className="task-head"><strong>{task.title}</strong>{task.priority === 1 && <span className="priority-high" title="High priority">↑</span>}</span>
                     {task.description && <span className="task-description">{task.description}</span>}
                     <span className="task-meta">
                       <span className="priority-label">P{task.priority || 2}</span>
                       {(execution || queued) && <span className={'execution-status ' + (execution?.status || 'queued')}>{execution?.status?.replaceAll('_', ' ') || 'queued'}</span>}
-                      {taskLinkedThread(task) && <span className="linked-label" title="Linked T3 thread">↗ Thread</span>}
+                      {taskLinkedThread(task) && <span className="linked-label" title="Linked T3 thread">Thread linked</span>}
                     </span>
                   </button>
                   <div className="task-footer">
-                    <button className="queue-button" disabled={busy} onClick={() => requestExecution(task)}>Queue</button>
+                    <button className="queue-button" disabled={busy} onClick={() => requestExecution(task)}>Run / Queue</button>
                     <details className="task-more">
                       <summary aria-label={'More actions for ' + task.title} title="More actions">•••</summary>
                       <div className="task-menu">
@@ -712,7 +724,7 @@ function App() {
       )}
     </section>), [
     tasks, runtime, busy, projectId, tabId, environmentId, tabUrl, threads, projects, currentProject?.workspaceRoot,
-    compactBoard, expandedLanes,
+    compactBoard, expandedLanes, dragTaskId, dragTarget,
   ]);
   return <main className="stack sidepanel">
     <header className="header">
@@ -745,7 +757,11 @@ function App() {
           <span>Environment</span>
           <select id="session-environment" aria-label="T3 session environment" disabled={busy || sessionEnvironments.length === 0}
             value={manualEnvironmentId || 'auto'} title={environmentLabel || 'Follow current T3 thread'}
-            onChange={e => setManualEnvironmentId(e.target.value === 'auto' ? '' : e.target.value)}>
+            onChange={e => {
+              const selected = e.target.value === 'auto' ? '' : e.target.value;
+              setManualEnvironmentId(selected);
+              setPreferences(p => ({ ...p, manualEnvironmentId: selected }));
+            }}>
             <option value="auto">{environmentLabel ? 'Current · ' + environmentLabel : 'Follow T3 thread'}</option>
             {sessionEnvironments.map(env => <option key={env.environmentId} value={env.environmentId}>
               {env.label} · {env.source === 'direct' ? 'Direct' : 'T3 session'}
@@ -755,7 +771,11 @@ function App() {
         <label className="context-field" htmlFor="project">
           <span>Project</span>
           <select id="project" aria-label="Project" title={currentProject?.workspaceRoot || 'Select project'} value={projectId} disabled={busy || projects.length === 0}
-            onChange={e => { manualProject.current = true; setProjectId(e.target.value); }}>
+            onChange={e => {
+              manualProject.current = true;
+              setProjectId(e.target.value);
+              setPreferences(p => ({ ...p, projectByEnvironment: { ...p.projectByEnvironment, [environmentId]: e.target.value } }));
+            }}>
             {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>) : <option value="">No project</option>}
           </select>
         </label>
@@ -763,7 +783,7 @@ function App() {
     </header>
     <nav className="section-tabs" aria-label="Companion sections">{(['kanban','overview'] as Page[]).map(p =>
       <button type="button" key={p} className={p === page ? 'selected' : ''} aria-current={p === page ? 'page' : undefined}
-        onClick={() => setPage(p)}>
+        onClick={() => { setPage(p); setPreferences(prev => ({ ...prev, page: p })); }}>
         {p === 'kanban' ? 'Board' : 'Overview'}
       </button>)}</nav>
     {error && <p className="notice" role="alert">{error}</p>}
@@ -864,14 +884,15 @@ function App() {
         </details>
       </div>
     </section>}
-    <dialog ref={detailsDialog} className="modal" onClose={() => setDetailsTaskId(null)}>
+    <dialog ref={detailsDialog} className="modal task-details-dialog" aria-label="Task details" onCancel={() => setDetailsTaskId(null)}
+      onClick={event => onDialogBackdrop(event, () => setDetailsTaskId(null))} onClose={() => setDetailsTaskId(null)}>
       <div className="modal-heading">
         <div><h2>{detailsTask?.title || 'Task details'}</h2><p className="muted">{detailsTask?.status.replaceAll('_', ' ')} · Priority {detailsTask?.priority || 2}</p></div>
         <button type="button" className="icon-button" aria-label="Close task details" onClick={() => setDetailsTaskId(null)}>×</button>
       </div>
       <div className="modal-content">
         {detailsTask?.description && <div className="detail-field"><strong>Description</strong><p>{detailsTask.description}</p></div>}
-        <div className="detail-field"><strong>Agent prompt</strong><p className="task-prompt">{detailsTask?.prompt}</p></div>
+        <div className="detail-field"><strong>Agent Prompt</strong><p className="task-prompt">{detailsTask?.prompt}</p></div>
         <div className="detail-field">
           <strong>Execution history</strong>
           {!detailsTask?.executionRequests?.length && <p className="muted">No execution requested yet.</p>}
@@ -894,17 +915,20 @@ function App() {
         </div>
       </div>
       <div className="modal-actions">
+        {detailsTask && taskLinkedThread(detailsTask) && threadUrl(taskLinkedThread(detailsTask)!) &&
+          <button onClick={() => { void openLinkedThread(taskLinkedThread(detailsTask)!); }}>Open T3 thread ↗</button>}
         <button onClick={() => { if (detailsTask) { const task = detailsTask; setDetailsTaskId(null); edit(task); } }}>Edit</button>
         <button className="primary" disabled={busy} onClick={() => { if (detailsTask) { const task = detailsTask; setDetailsTaskId(null); requestExecution(task); } }}>Queue execution</button>
       </div>
     </dialog>
-    <dialog ref={editorDialog} className="modal" onClose={() => setEditing(null)}>
+    <dialog ref={editorDialog} className="modal task-editor-dialog" aria-label="Task editor" onCancel={() => setEditing(null)}
+      onClick={event => onDialogBackdrop(event, () => setEditing(null))} onClose={() => setEditing(null)}>
       <div className="modal-heading"><h2>{editing && tasks.tasks.some(t => t.id === editing.id) ? 'Edit task' : 'New task'}</h2>
         <button type="button" className="icon-button" aria-label="Close task editor" onClick={() => setEditing(null)}>×</button></div>
       <div className="modal-content">
-        <label>Title<input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })}/></label>
-        <label>Description<textarea rows={2} value={draft.description || ''} onChange={e => setDraft({ ...draft, description: e.target.value })}/></label>
-        <label>Agent prompt<textarea rows={6} value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })}/></label>
+        <label>Task Title<input autoFocus maxLength={180} placeholder="Short, actionable task name" value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })}/></label>
+        <label>Description <span className="optional-label">Optional · shown on the card</span><textarea rows={2} placeholder="Context or acceptance criteria" value={draft.description || ''} onChange={e => setDraft({ ...draft, description: e.target.value })}/></label>
+        <label>Agent Prompt <span className="optional-label">Sent to T3; separate from task title</span><textarea rows={7} placeholder="Tell the coding agent what to investigate, change and verify…" value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })}/></label>
         <div className="field-pair">
           <label>Priority<select value={draft.priority ?? 2} onChange={e => setDraft({ ...draft, priority: Number(e.target.value) })}><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></label>
           <label>Status<select value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value as Status })}>{columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label>
@@ -913,12 +937,33 @@ function App() {
       <div className="modal-actions"><button onClick={() => setEditing(null)}>Cancel</button>
         <button className="primary" disabled={busy || !draft.title.trim() || !draft.prompt.trim()} onClick={() => void action(saveTask)}>Save task</button></div>
     </dialog>
-    <dialog ref={queueDialog} className="modal" onClose={() => setQueueTarget(null)}>
+    <dialog ref={queueDialog} className="modal queue-dialog" aria-label="Queue execution" onCancel={() => setQueueTarget(null)}
+      onClick={event => onDialogBackdrop(event, () => setQueueTarget(null))} onClose={() => setQueueTarget(null)}>
       <div className="modal-heading"><div><h2>Queue execution</h2><p className="muted">{queueTarget?.title}</p></div>
         <button type="button" className="icon-button" aria-label="Close execution dialog" onClick={() => setQueueTarget(null)}>×</button></div>
       <div className="modal-content">
-        <label>Not before (optional)<input type="datetime-local" value={schedule} onChange={e => setSchedule(e.target.value)}/></label>
-        <label>Worktree base ref (optional)<input placeholder="main" value={worktree} onChange={e => setWorktree(e.target.value)}/></label>
+        <p className="modal-intro">This creates an execution request. The task title stays on the Board; only its Agent Prompt is sent to T3.</p>
+        <label>Workspace
+          <select value={workspaceMode} onChange={e => {
+            const mode = e.target.value as WorkspaceMode;
+            setWorkspaceMode(mode); rememberWorkspace(mode, worktree);
+          }}>
+            <option value="auto">Auto · isolated worktree for Git projects</option>
+            <option value="worktree">Always create worktree</option>
+            <option value="root">Shared project checkout (serial)</option>
+          </select>
+        </label>
+        <details className="advanced-options" open={queueAdvancedOpen} onToggle={event => setQueueAdvancedOpen(event.currentTarget.open)}>
+          <summary>Advanced options</summary>
+          <div className="advanced-fields">
+            {workspaceMode !== 'root' && <label>Base branch (optional)
+              <input placeholder="Auto-detect current Git branch" value={worktree} onChange={e => {
+                setWorktree(e.target.value); rememberWorkspace(workspaceMode, e.target.value);
+              }}/>
+            </label>}
+            <label>Not before (optional)<input type="datetime-local" value={schedule} onChange={e => setSchedule(e.target.value)}/></label>
+          </div>
+        </details>
       </div>
       <div className="modal-actions"><button onClick={() => setQueueTarget(null)}>Cancel</button>
         <button className="primary" disabled={busy || !queueTarget} onClick={() => void action(async () => { if (queueTarget) { await enqueue(queueTarget); setQueueTarget(null); } })}>Queue request</button></div>
