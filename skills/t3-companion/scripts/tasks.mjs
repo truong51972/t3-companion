@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 const statuses = new Set(['todo', 'in_progress', 'review', 'awaiting_merge', 'done']);
 const commands = new Set(['list', 'show', 'add', 'set', 'queue', 'remove']);
 const [command, ...args] = process.argv.slice(2);
-const usage = 'Usage: tasks.mjs <list|show|add|set|queue|remove> [--project path] [--id id] [--title text] [--prompt text] [--description text] [--priority 1..3] [--status status] [--workspace auto|root|worktree] [--worktree base-ref] [--not-before ISO-8601]';
+const usage = 'Usage: tasks.mjs <list|show|add|set|queue|remove> [--project path] [--id id] [--title text] [--prompt text] [--description text] [--priority 1..3] [--status status] [--workspace auto|root|worktree] [--base-ref git-ref] [--branch new-branch] [--provider instance-id --model model-slug] [--not-before ISO-8601] (add/set only)';
 
 function options(argv) {
   const result = {};
@@ -17,12 +17,45 @@ function options(argv) {
       throw new Error('Invalid option: ' + option);
     }
     const key = option.slice(2);
-    if (!['project','id','title','prompt','description','priority','status','workspace','worktree','not-before'].includes(key) || Object.hasOwn(result, key)) {
+    if (!['project','id','title','prompt','description','priority','status','workspace','base-ref','branch','provider','model','not-before'].includes(key) || Object.hasOwn(result, key)) {
       throw new Error('Unknown or duplicate option: ' + option);
     }
     result[key] = argv[i + 1];
   }
   return result;
+}
+function validExecution(value) {
+  if (!value || typeof value !== 'object' || !['auto','root','worktree'].includes(value.workspace)) return false;
+  if (value.baseRef !== undefined && (typeof value.baseRef !== 'string' || !value.baseRef.trim())) return false;
+  if (value.branch !== undefined && (typeof value.branch !== 'string' || !value.branch.trim())) return false;
+  if (value.notBefore !== undefined && (typeof value.notBefore !== 'string' || Number.isNaN(Date.parse(value.notBefore)))) return false;
+  if (value.workspace === 'root' && (value.baseRef || value.branch)) return false;
+  if (value.branch && !value.baseRef && value.workspace !== 'auto') return false;
+  if (value.modelSelection !== undefined && (
+    !value.modelSelection || typeof value.modelSelection.instanceId !== 'string' ||
+    !value.modelSelection.instanceId.trim() || typeof value.modelSelection.model !== 'string' ||
+    !value.modelSelection.model.trim())) return false;
+  return true;
+}
+const executionFlags = ['workspace','base-ref','branch','provider','model','not-before'];
+function setExecution(task, opt) {
+  if (!executionFlags.some(key => opt[key] !== undefined)) return;
+  const next = { workspace: 'auto', ...task.execution };
+  if (opt.workspace !== undefined) next.workspace = opt.workspace;
+  if (opt['base-ref'] !== undefined) next.baseRef = opt['base-ref'];
+  if (opt.branch !== undefined) next.branch = opt.branch;
+  if (opt['not-before'] !== undefined) next.notBefore = opt['not-before'];
+  if ((opt.provider === undefined) !== (opt.model === undefined))
+    throw new Error('--provider and --model must be specified together');
+  if (opt.provider !== undefined) next.modelSelection = { instanceId: opt.provider, model: opt.model };
+  if (next.workspace === 'root') { delete next.baseRef; delete next.branch; }
+  if (next.notBefore !== undefined) {
+    const date = new Date(next.notBefore);
+    if (Number.isNaN(date.getTime())) throw new Error('Invalid --not-before date');
+    next.notBefore = date.toISOString();
+  }
+  if (!validExecution(next)) throw new Error('Invalid task execution settings');
+  task.execution = next;
 }
 function validate(doc) {
   if (doc?.version !== 1 || !Array.isArray(doc.tasks)) throw new Error('Invalid tasks.json; refusing to overwrite');
@@ -33,6 +66,7 @@ function validate(doc) {
         (task.description !== undefined && typeof task.description !== 'string') ||
         (task.priority !== undefined && (!Number.isInteger(task.priority) || task.priority < 1 || task.priority > 3)) ||
         (task.statusOverride !== undefined && typeof task.statusOverride !== 'boolean') ||
+        (task.execution !== undefined && !validExecution(task.execution)) ||
         (task.executionRequests !== undefined && !Array.isArray(task.executionRequests))) {
       throw new Error('Invalid task in tasks.json; refusing to overwrite');
     }
@@ -41,7 +75,8 @@ function validate(doc) {
       if (!request || typeof request.requestId !== 'string' || !request.requestId || requestIds.has(request.requestId) ||
           (request.worktree !== undefined && typeof request.worktree !== 'string') ||
           (request.workspace !== undefined && !['auto','root','worktree'].includes(request.workspace)) ||
-          (request.notBefore !== undefined && typeof request.notBefore !== 'string')) {
+          (request.notBefore !== undefined && typeof request.notBefore !== 'string') ||
+          (request.execution !== undefined && !validExecution(request.execution))) {
         throw new Error('Invalid execution request in tasks.json; refusing to overwrite');
       }
       requestIds.add(request.requestId);
@@ -98,10 +133,12 @@ async function main() {
     if (!opt.title?.trim() || !opt.prompt?.trim()) throw new Error('--title and --prompt are required');
     const task = { id: randomUUID(), title: opt.title.trim(), prompt: opt.prompt, status: 'todo', priority: opt.priority === undefined ? 2 : priority(opt.priority) };
     if (opt.description !== undefined) task.description = opt.description;
+    task.execution = { workspace: 'auto' };
+    setExecution(task, opt);
     doc.tasks.push(task); result = task;
   } else if (command === 'set') {
     const task = get(doc, opt.id);
-    if (!['title','prompt','description','priority','status'].some(key => opt[key] !== undefined)) throw new Error('Provide a field to update');
+    if (!['title','prompt','description','priority','status',...executionFlags].some(key => opt[key] !== undefined)) throw new Error('Provide a field to update');
     if (opt.title !== undefined) {
       if (!opt.title.trim()) throw new Error('Title cannot be empty');
       task.title = opt.title.trim();
@@ -118,22 +155,17 @@ async function main() {
       task.status = opt.status;
       task.statusOverride = true;
     }
+    setExecution(task, opt);
     result = task;
   } else if (command === 'queue') {
+    if (executionFlags.some(key => opt[key] !== undefined)) {
+      throw new Error('Execution options belong to the task. Use add/set before queue.');
+    }
     const task = get(doc, opt.id);
-    const workspace = opt.workspace || (opt.worktree === undefined ? 'auto' : 'worktree');
-    if (!['auto','root','worktree'].includes(workspace)) throw new Error('Workspace must be auto, root or worktree');
-    if (workspace === 'root' && opt.worktree !== undefined) throw new Error('--worktree base ref cannot be used with --workspace root');
-    const request = { requestId: randomUUID(), workspace };
-    if (opt.worktree !== undefined) {
-      if (!opt.worktree.trim()) throw new Error('Worktree cannot be empty');
-      request.worktree = opt.worktree;
-    }
-    if (opt['not-before'] !== undefined) {
-      const when = new Date(opt['not-before']);
-      if (Number.isNaN(when.getTime())) throw new Error('Invalid --not-before date');
-      request.notBefore = when.toISOString();
-    }
+    const execution = structuredClone(task.execution || { workspace: 'auto' });
+    if (!validExecution(execution)) throw new Error('Invalid saved task execution settings');
+    const request = { requestId: randomUUID(), execution };
+    if (execution.notBefore) request.notBefore = execution.notBefore;
     task.status = 'todo';
     task.statusOverride = false;
     task.executionRequests ??= [];
