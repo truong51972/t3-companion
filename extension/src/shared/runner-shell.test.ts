@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readableTerminalText, runnerShellCommand, terminalSubmit, CONTROL_SOURCE_REF, RUNNER_SOURCE_REF } from './runner-shell.ts';
@@ -129,4 +129,77 @@ test('compact status executes through POSIX sh or Windows PowerShell', () => {
 test('strips PTY control sequences while preserving output line boundaries', () => {
   const raw = '\u001b]2;title\u0007\u001b[1mT3_COMPANION_RESULT:{"running":true}\r\n' + MARKER + ':0\r\n\u001b[0m';
   assert.equal(readableTerminalText(raw), 'T3_COMPANION_RESULT:{"running":true}\n' + MARKER + ':0');
+});
+
+test('update bootstraps a new controller before dispatching update to an installed legacy controller', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-update-legacy-'));
+  const root = path.join(home, '.t3', 'companion');
+  const sha = 'c'.repeat(40);
+  const currentController = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
+  const newRunner = [
+    "const command=process.argv[2];",
+    "if(command==='status')console.log(JSON.stringify({running:false,pid:null}));",
+    "else if(command==='stop')console.log(JSON.stringify({requested:true}));",
+    "else if(command==='start')console.log(JSON.stringify({pid:321}));",
+    "else{process.stderr.write('unknown command');process.exitCode=1}"
+  ].join('');
+  const payloads: Record<string, string> = {
+    'runner/bin/t3-runner.mjs': newRunner,
+    'runner/src/cli.ts': '// upgraded',
+    'runner/src/runner.ts': '// upgraded',
+    'runner/src/storage.ts': '// upgraded',
+    'runner/src/workflow.ts': '// upgraded',
+  };
+  try {
+    mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
+    mkdirSync(path.join(root, 'runner', 'bin'), { recursive: true });
+    // This controller is installed from main and rejects update/configure.
+    writeFileSync(path.join(root, 'runner-control.cjs'),
+      "console.log('T3_COMPANION_ERROR:Unknown Runner operation');" +
+      "console.log(process.argv[2]+':1');process.exitCode=1;");
+    for (const file of Object.keys(payloads).filter(item => item !== 'runner/src/workflow.ts'))
+      writeFileSync(path.join(root, file), file.endsWith('.mjs') ? newRunner : '// legacy');
+
+    const command = runnerShellCommand('update', undefined, MARKER);
+    assert.match(command, /raw\.githubusercontent\.com/);
+    assert.ok(command.endsWith(' -- update ' + MARKER + ' ' + RUNNER_SOURCE_REF));
+    const script = command.slice('node -e "'.length).split('" -- ')[0];
+    // Fake the control bootstrap and GitHub source downloads. No external network.
+    const mock = [
+      'const sha=' + JSON.stringify(sha) + ';',
+      'const controller=' + JSON.stringify(currentController) + ';',
+      'const payloads=' + JSON.stringify(payloads) + ';',
+      'global.fetch=async url=>{',
+      'const source=String(url);',
+      "if(source.endsWith('/runner/bin/companion-control.cjs'))return {ok:true,text:async()=>controller};",
+      "if(source.includes('/commits/'))return {ok:true,json:async()=>({sha})};",
+      "const key=source.split('/'+sha+'/')[1];",
+      "if(key&&Object.hasOwn(payloads,key))return {ok:true,text:async()=>payloads[key]};",
+      "throw Error('Unexpected fetch '+source);",
+      '};',
+    ].join('');
+    const child = spawnSync(process.execPath,
+      ['-e', mock + script, '--', 'update', MARKER, RUNNER_SOURCE_REF],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 15000 });
+    assert.equal(child.status, 0, [child.stderr, child.stdout].join('\n'));
+    const match = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
+    assert.ok(match, child.stdout);
+    const result = JSON.parse(match[1]);
+    assert.equal(result.updated, true);
+    assert.equal(result.version, sha);
+    assert.ok(existsSync(path.join(root, 'runner', 'src', 'workflow.ts')));
+    assert.equal(JSON.parse(readFileSync(path.join(root, 'runner', 'install.json'), 'utf8')).sha, sha);
+    assert.ok(!child.stdout.includes('Unknown Runner operation'));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('build pins the source commit instead of using main for PR-preview upgrades', () => {
+  const config = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8');
+  assert.match(config, /execFileSync\('git', \['rev-parse', 'HEAD'\]/);
+  assert.match(config, /__T3_COMPANION_SOURCE_REF__/);
+  const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
+  assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
+  assert.match(controller, /commits\/\' \+ sourceRef/);
 });
