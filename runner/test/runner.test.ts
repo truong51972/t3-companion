@@ -219,10 +219,16 @@ test('Runner settings persist and control the scheduler independently of browser
   await saveRunnerSettings({ maxConcurrent: 1, scanIntervalMs: 10000 }, home);
   await registerProject(project, home);
   for (let i = 0; i < 3; i++) await createTask(project, 'Task ' + i, 'work', 'main');
-  let active = 0, peak = 0;
+  let active = 0, peak = 0, waitForPair = false;
+  let release!: () => void;
+  const pair = new Promise<void>(resolve => { release = resolve; });
   const execute = async () => {
     active++; peak = Math.max(active, peak);
-    await new Promise(resolve => setTimeout(resolve, 15));
+    if (waitForPair && active >= 2) release();
+    await Promise.race([
+      waitForPair ? pair : Promise.resolve(),
+      new Promise<void>(resolve => setTimeout(resolve, 400)),
+    ]);
     active--;
     return { status: 'completed' as const };
   };
@@ -230,7 +236,7 @@ test('Runner settings persist and control the scheduler independently of browser
   assert.equal(peak, 1);
   assert.equal(Object.keys((await readRuntime(project)).requests).length, 1);
   await saveRunnerSettings({ maxConcurrent: 2, scanIntervalMs: 10000 }, home);
-  peak = 0;
+  waitForPair = true; peak = 0;
   await runRunner({ home, once: true, execute });
   assert.equal(peak, 2);
   assert.equal(Object.keys((await readRuntime(project)).requests).length, 3);
