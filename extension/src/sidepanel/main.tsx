@@ -213,13 +213,17 @@ function App() {
     return () => clearTimeout(timer);
   }, [notice]);
   useEffect(() => {
-    const menus = () => [runnerProjectsMenu.current, connectionMenu.current];
+    const menus = () => [
+      runnerProjectsMenu.current,
+      connectionMenu.current,
+      ...Array.from(document.querySelectorAll<HTMLDetailsElement>('.task-more[open]')),
+    ];
     const closeOnOutsideClick = (event: PointerEvent) => {
       const path = event.composedPath();
       for (const menu of menus()) if (menu?.open && !path.includes(menu)) menu.open = false;
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
       for (const menu of menus()) if (menu?.open) {
         menu.open = false;
         menu.querySelector('summary')?.focus();
@@ -783,17 +787,29 @@ function App() {
                       <summary aria-label={'More actions for ' + task.title} title="More actions">•••</summary>
                       <div className="task-menu">
                         <label>Move to<select aria-label={'Move ' + task.title} value={task.status}
-                          onChange={e => void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status: e.target.value as Status, statusOverride: true } : t) }), task))}>
+                          onChange={e => {
+                            e.currentTarget.closest('details')?.removeAttribute('open');
+                            const status = e.target.value as Status;
+                            void action(async () => mutateTask(task.id, d => ({
+                              ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status, statusOverride: true } : t),
+                            }), task));
+                          }}>
                           {columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                         </select></label>
                         <div className="menu-actions">
-                          <button onClick={() => edit(task)}>Edit</button>
-                          <button className="danger" onClick={() => setConfirmation({
+                          <button onClick={event => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            edit(task);
+                          }}>Edit</button>
+                          <button className="danger" onClick={event => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            setConfirmation({
                         title: 'Delete task?',
                         description: 'This removes the task from Companion Board. It does not delete T3 threads or Git worktrees.',
                         confirmLabel: 'Delete task', dangerous: true,
                         run: async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.filter(t => t.id !== task.id) }), task),
-                      })}>Delete</button>
+                            });
+                          }}>Delete</button>
                         </div>
                       </div>
                     </details>
