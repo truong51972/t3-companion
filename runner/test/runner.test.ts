@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite, filesFor, listProjects, readRuntime, readTasks, registerProject, unregisterProject, createTask } from '../src/storage.ts';
-import { runRunner, status, requestStop } from '../src/runner.ts';
+import { runRunner, status, requestStop, workspaceBaseFor } from '../src/runner.ts';
 async function sandbox(t: any) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 't3-companion-'));
   t.after(() => fs.rm(tmp, { recursive: true, force: true }));
@@ -138,4 +138,65 @@ test('cloned runner bin works directly with Node without npm link', async t => {
   const data = JSON.parse(result.stdout);
   assert.equal(data.running, false);
   assert.equal(data.home, home);
+});
+
+test('auto workspace resolves the selected Git branch, without hardcoded main', async t => {
+  const { project } = await sandbox(t);
+  const init = spawnSync('git', ['init', '-b', 'feature/test', project], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'auto' }), 'feature/test');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'worktree', worktree: 'release' }), 'release');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'root', worktree: 'release' }), null);
+  assert.equal(workspaceBaseFor(project, { requestId: 'x' }), null, 'legacy requests stay in root');
+});
+test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async t => {
+  const { project, home } = await sandbox(t);
+  await registerProject(project, home);
+  const a = await createTask(project, 'A', 'one');
+  const b = await createTask(project, 'B', 'two');
+  const doc = await readTasks(project);
+  for (const task of doc.tasks) task.executionRequests![0].workspace = 'auto';
+  await atomicWrite(filesFor(project).tasks, doc);
+  let active = 0, peak = 0;
+  const execute = async () => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return { status: 'completed' as const };
+  };
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 1, 'non-Git auto workspace uses serial root');
+  assert.equal(Object.keys((await readRuntime(project)).requests).length, 1);
+  const init = spawnSync('git', ['init', '-b', 'integration', project], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+  // Existing completed request does not re-run; the next run can execute other isolated requests.
+  const next = await readTasks(project);
+  next.tasks[0].executionRequests!.push({ requestId: 'git-1', workspace: 'auto' });
+  next.tasks[1].executionRequests!.push({ requestId: 'git-2', workspace: 'auto' });
+  await atomicWrite(filesFor(project).tasks, next);
+  peak = 0;
+  await runRunner({ home, once: true, execute });
+  assert.equal(peak, 2, 'Git auto workspace uses independent worktrees');
+  assert.equal(a.title, 'A'); assert.equal(b.title, 'B');
+});
+test('explicit root request stays serialized even with a baseRef field', async t => {
+  const { project, home } = await sandbox(t);
+  await registerProject(project, home);
+  await createTask(project, 'A', 'one');
+  await createTask(project, 'B', 'two');
+  const doc = await readTasks(project);
+  for (const task of doc.tasks) {
+    task.executionRequests![0].workspace = 'root';
+    task.executionRequests![0].worktree = 'unexpected-legacy-base';
+  }
+  await atomicWrite(filesFor(project).tasks, doc);
+  let active = 0, peak = 0;
+  await runRunner({ home, once: true, execute: async () => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return { status: 'completed' };
+  }});
+  assert.equal(peak, 1);
 });
