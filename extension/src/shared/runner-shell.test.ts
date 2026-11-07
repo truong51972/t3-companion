@@ -149,6 +149,7 @@ test('update bootstraps a new controller before dispatching update to an install
     'runner/src/runner.ts': '// upgraded',
     'runner/src/storage.ts': '// upgraded',
     'runner/src/workflow.ts': '// upgraded',
+    'runner/src/t3-cli.ts': '// upgraded',
   };
   try {
     mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
