@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
 export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed' | 'needs_reconciliation';
-export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string }
+export interface ExecutionRequest { requestId: string; notBefore?: string; worktree?: string; workspace?: 'auto' | 'root' | 'worktree' }
 export interface Task { id: string; title: string; prompt: string; description?: string; status: TaskStatus; priority?: number; executionRequests?: ExecutionRequest[] }
 export interface TaskDocument { version: 1; tasks: Task[] }
 export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null }
@@ -65,7 +65,9 @@ function validTaskDocument(data: any): data is TaskDocument {
     return task.executionRequests === undefined || (Array.isArray(task.executionRequests) && task.executionRequests.every((req: any) => {
       if (!req || typeof req.requestId !== 'string' || !req.requestId || requestIds.has(req.requestId)) return false;
       requestIds.add(req.requestId);
-      return (req.worktree === undefined || typeof req.worktree === 'string') && (req.notBefore === undefined || typeof req.notBefore === 'string');
+      return (req.worktree === undefined || typeof req.worktree === 'string') &&
+        (req.workspace === undefined || ['auto','root','worktree'].includes(req.workspace)) &&
+        (req.notBefore === undefined || typeof req.notBefore === 'string');
     }));
   });
 }
