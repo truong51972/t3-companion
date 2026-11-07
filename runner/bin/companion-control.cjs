@@ -20,6 +20,10 @@ const files = [
   'runner/src/workflow.ts',
 ];
 // Release channel: resolve main to one immutable SHA before fetching all files.
+const coreFiles = files.filter(file => file !== 'runner/src/workflow.ts');
+const fileExists = file => fs.existsSync(path.join(root, file));
+const hasLegacyRunner = () => coreFiles.every(fileExists);
+const hasCurrentRunner = () => files.every(fileExists);
 const REPOSITORY = 'truong51972/t3-companion';
 const SOURCE_REF = 'main';
 
@@ -37,13 +41,13 @@ function installation() {
   catch { return null; }
 }
 function state(extra = {}) {
-  const installed = files.every(file => fs.existsSync(path.join(root, file)));
-  return installed ? { ...run('status'), installed: true, version: installation()?.sha || null, ...extra }
+  const installed = hasLegacyRunner();
+  return installed ? { ...run('status'), installed: true, upgradeRequired: !hasCurrentRunner(), version: installation()?.sha || null, ...extra }
     : { installed: false, running: false, pid: null, version: null, ...extra };
 }
 async function downloadAndInstall(force) {
-  const installed = files.every(file => fs.existsSync(path.join(root, file)));
-  const previous = installed ? run('status') : { running: false };
+  const installed = hasCurrentRunner();
+  const previous = hasLegacyRunner() ? run('status') : { running: false };
   const previousInstall = installation();
   const source = await fetch('https://api.github.com/repos/' + REPOSITORY + '/commits/' + SOURCE_REF,
     { headers: { 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
@@ -116,7 +120,7 @@ async function downloadAndInstall(force) {
   } catch (error) {
     // If the download or replacement failed after a graceful stop, restart
     // the intact old Runner whenever it is safe to do so.
-    if (previous.running && files.every(file => fs.existsSync(path.join(root, file)))) {
+    if (previous.running && hasLegacyRunner()) {
       try { if (!run('status').running) run('start'); } catch { /* preserve original failure */ }
     }
     throw error;
@@ -137,7 +141,7 @@ async function main() {
     }
     return result;
   }
-  if (!files.every(file => fs.existsSync(path.join(root, file)))) return state();
+  if (!hasLegacyRunner()) return state();
   if (verb === 'start') {
     if (!run('status').running) {
       try { run('start'); } catch (error) { if (!/already running/i.test(String(error))) throw error; }
