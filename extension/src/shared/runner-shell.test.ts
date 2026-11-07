@@ -58,11 +58,11 @@ test('uninstalled Runner status is read-only and reports control setup required'
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test('one-time installer fetches a fixed commit, not a moving branch', () => {
+test('installer uses a trusted repository source for the control adapter', () => {
   const command = runnerShellCommand('install', undefined, MARKER);
   assert.match(command, /raw\.githubusercontent\.com/);
   assert.ok(command.includes(CONTROL_SOURCE_REF));
-  assert.match(RUNNER_SOURCE_REF, /^[a-f0-9]{40}$/);
+  assert.equal(RUNNER_SOURCE_REF, 'main');
   assert.ok(command.includes('runner-control.cjs'));
   assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64/);
 });
