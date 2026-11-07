@@ -85,6 +85,26 @@ export function TaskDetailsModal({
           <p className="task-prompt">{task.prompt}</p>
         </div>
         <div className="detail-field">
+          <strong>Execution settings</strong>
+          <p className="task-execution-summary">
+            Workspace: {task.execution?.workspace === 'root' ? 'Current checkout'
+              : task.execution?.workspace === 'worktree' ? 'New worktree'
+              : 'Auto worktree'}
+            {task.execution?.baseRef ? ' · From ' + task.execution.baseRef : ''}
+            {task.execution?.branch ? ' · Branch ' + task.execution.branch : ''}
+          </p>
+          <p className="task-execution-summary">
+            Model: {task.execution?.modelSelection
+              ? task.execution.modelSelection.model + ' (' + task.execution.modelSelection.instanceId + ')'
+              : 'T3 project default'}
+          </p>
+          {task.execution?.notBefore && (
+            <p className="task-execution-summary">
+              Not before: {new Date(task.execution.notBefore).toLocaleString()}
+            </p>
+          )}
+        </div>
+        <div className="detail-field">
           <strong>Execution history</strong>
           {!task.executionRequests?.length && (
             <p className="muted">No execution requested yet.</p>
@@ -111,6 +131,14 @@ export function TaskDetailsModal({
                       {pr.url} · {pr.state}
                     </a>
                   ))}
+                  {request.execution && (
+                    <span className="muted">
+                      {request.execution.workspace === 'root' ? 'Current checkout' : 'Worktree'}
+                      {request.execution.baseRef ? ' · From ' + request.execution.baseRef : ''}
+                      {request.execution.branch ? ' · ' + request.execution.branch : ''}
+                      {request.execution.modelSelection ? ' · ' + request.execution.modelSelection.model : ''}
+                    </span>
+                  )}
                   {request.worktree && (
                     <span className="muted">Worktree: {request.worktree}</span>
                   )}
