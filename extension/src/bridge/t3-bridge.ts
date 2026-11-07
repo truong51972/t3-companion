@@ -220,8 +220,18 @@ async function terminalCommand(tabId: number, environmentId: string, project: Pr
  * CLI and data paths stay stable across installs and upgrades. */
 export async function runnerCommand(tabId: number, environmentId: string, project: Project, hostThreadId: string,
   verb: RunnerVerb, target?: string): Promise<string> {
+  const updatingCode = ['install', 'update', 'reinstall'].includes(verb);
+  // T3 identifies the selected execution host, not the user's browser OS.
+  const platform = updatingCode
+    ? await rpc<{environment?: {platform?: {os?: string}}}>(
+      tabId, environmentId, 'server.getConfig', {}, 12000)
+    : null;
+  const hostOs = platform?.environment?.platform?.os;
+  if (updatingCode && !['windows', 'linux', 'darwin'].includes(hostOs || ''))
+    throw new Error('Cannot determine T3 execution host OS for Git install/update.');
   const command = (action: RunnerVerb) => terminalCommand(tabId, environmentId, project, hostThreadId,
-    marker => runnerShellCommand(action, target, marker),
+    marker => runnerShellCommand(action, target, marker,
+      (hostOs || 'linux') as 'windows' | 'linux' | 'darwin'),
     ['install', 'update', 'reinstall'].includes(action) ? 150000 : action === 'status' ? 18000 : 38000);
   if (verb !== 'update' && verb !== 'reinstall') return command(verb);
   const before = JSON.parse(await command('status')) as {

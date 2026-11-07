@@ -120,3 +120,16 @@ test('PTY submit and terminal output normalization retain response markers', () 
     MARKER + ':0\r\n\u001b[0m';
   assert.equal(readableTerminalText(raw), 'T3_COMPANION_RESULT:{"running":true}\n' + MARKER + ':0');
 });
+
+test('Windows Git operations use a PowerShell-safe home path, not native tilde', () => {
+  const install = runnerShellCommand('install', undefined, MARKER, 'windows');
+  const update = runnerShellCommand('update', undefined, MARKER, 'windows');
+  assert.ok(install.startsWith('git clone ' + RUNNER_REPOSITORY + ' "$HOME/.t3/t3-companion"'));
+  assert.ok(update.startsWith('git -C "$HOME/.t3/t3-companion" pull --ff-only'));
+  for (const cmd of [install, update]) {
+    assert.ok(cmd.includes('if ($LASTEXITCODE -eq 0)'));
+    assert.ok(!cmd.includes(' && '));
+    assert.ok(!cmd.includes(' || '));
+    assert.ok(cmd.includes('Write-Output "' + MARKER + ':1"'));
+  }
+});

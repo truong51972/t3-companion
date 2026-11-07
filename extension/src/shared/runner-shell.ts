@@ -13,13 +13,24 @@ function encodeTarget(target: string): string {
   return btoa(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 /** Project paths are inert base64url data, never shell source. */
-export function runnerShellCommand(verb: RunnerVerb, target: string | undefined, marker: string): string {
+export function runnerShellCommand(verb: RunnerVerb, target: string | undefined, marker: string,
+  hostOs: 'windows' | 'linux' | 'darwin' = 'linux'): string {
   if (!/^COMPANION_[a-f0-9]{32}$/.test(marker)) throw new Error('Invalid Runner command marker');
   if (['add', 'remove', 'inspect'].includes(verb) && !target) throw new Error('Project path required');
   if (verb === 'configure' && !/^[1-3]$/.test(target || '')) throw new Error('Max concurrent must be 1..3');
   const actualVerb = verb === 'reinstall' || verb === 'update' ? 'status' : verb;
   const args = ['companion', actualVerb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
   const control = 'node -e "' + (verb === 'status' ? STATUS : ENTRY) + '" -- ' + args.join(' ');
+  if (hostOs === 'windows' && ['install', 'update', 'reinstall'].includes(verb)) {
+    // PowerShell 5.1 and 7: native Git does not reliably expand ~ on Windows.
+    // Check LASTEXITCODE before calling the local checkout's controller.
+    const dir = '"$HOME/.t3/t3-companion"';
+    const git = verb === 'install'
+      ? 'git clone ' + RUNNER_REPOSITORY + ' ' + dir
+      : 'git -C ' + dir + ' pull --ff-only';
+    return git + '; if ($LASTEXITCODE -eq 0) { ' + control +
+      ' } else { Write-Output "' + marker + ':1" }';
+  }
   if (verb === 'install')
     return 'git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT +
       ' && ' + control + ' || echo ' + marker + ':1';
