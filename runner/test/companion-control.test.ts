@@ -77,7 +77,8 @@ test('start, stop and project arguments use the local controller without shell e
   assert.equal(added.status, 0, added.stderr);
   assert.equal(added.data.projects.target, target);
   const inspect = run('inspect', target);
-  assert.equal(inspect.status, 0, inspect.stderr);
+  assert.equal(inspect.status, 0, JSON.stringify({stdout:inspect.stdout,stderr:inspect.stderr,error:inspect.error?.message}));
+  assert.ok(inspect.data, JSON.stringify({stdout:inspect.stdout,stderr:inspect.stderr,error:inspect.error?.message}));
   assert.equal(inspect.data.projectInspection.target, target);
   const stopped = run('stop');
   assert.equal(stopped.status, 0, stopped.stderr);
