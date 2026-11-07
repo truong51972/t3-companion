@@ -38,6 +38,44 @@ test('parseRunnerState handles uninstalled and running states without regex', ()
   assert.equal(noHostState.label, 'Needs session');
 });
 
+test('parseRunnerState accepts actual Runner CLI status envelope with nested settings', () => {
+  // runner/src/cli.ts produces {running,pid,home,settings,cli}; the controller
+  // merges that with installed/version rather than flattening settings.
+  const actualStatus = JSON.stringify({
+    running: true,
+    pid: 8412,
+    home: '/home/test/.t3/runner',
+    settings: { maxConcurrent: 2, scanIntervalMs: 15000 },
+    cli: { available: true, command: '/home/test/.local/bin/t3', source: 'local-install' },
+    installed: true,
+    upgradeRequired: false,
+    version: 'a'.repeat(40),
+  });
+  const state = parseRunnerState(actualStatus, true);
+  assert.equal(state.label, 'Running');
+  assert.equal(state.maxConcurrent, 2);
+  assert.equal(state.scanIntervalMs, 15000);
+  assert.equal(state.cliAvailable, true);
+  assert.equal(state.upgradeRequired, false);
+});
+
+test('nested settings take precedence over stale flat values, malformed values fail closed', () => {
+  const valid = parseRunnerState(JSON.stringify({
+    installed: true, running: false,
+    maxConcurrent: 3, scanIntervalMs: 10000,
+    settings: { maxConcurrent: 1, scanIntervalMs: 20000 },
+  }), true);
+  assert.equal(valid.maxConcurrent, 1);
+  assert.equal(valid.scanIntervalMs, 20000);
+
+  const invalid = parseRunnerState(JSON.stringify({
+    installed: true, running: false,
+    settings: { maxConcurrent: '3', scanIntervalMs: '10000' },
+  }), true);
+  assert.equal(invalid.maxConcurrent, 3);
+  assert.equal(invalid.scanIntervalMs, null);
+});
+
 test('getTaskColumn projects status correctly from runtime record and manual override', () => {
   const task: Task = {
     id: 'task-1',
