@@ -700,6 +700,9 @@ function App() {
     const key = scopedKey.current;
     runnerActionInFlight.current = true;
     setRunnerBusy(true);
+    // Clear stale status errors before a new operation. Failed updates surface
+    // once in the page-level action banner, not a second "Could not verify".
+    if (scopedKey.current === key) setRunnerStatusError('');
     try {
       // Respect manual Stop by disabling future one-shot auto-start.
       if (verb === 'stop' || verb === 'start' || verb === 'install') {
@@ -716,11 +719,13 @@ function App() {
         if (verb !== 'status') setNotice(verb === 'install' ? 'Runner installed and started.' : 'Runner: ' + verb);
       }
     } catch (err) {
-      if (scopedKey.current === key) {
+      if (scopedKey.current === key && verb === 'status') {
         setRunnerStatusError(String(err));
         setRunnerResult(current => current.startsWith('{') ? current : 'Runner check failed: ' + String(err));
       }
-      throw err;
+      // A Refresh failure is local to Runner. Other operations propagate to the
+      // page action banner without duplicating the same error within Overview.
+      if (verb !== 'status') throw err;
     } finally {
       runnerActionInFlight.current = false;
       setRunnerBusy(false);
