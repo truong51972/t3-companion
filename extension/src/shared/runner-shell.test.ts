@@ -1,285 +1,122 @@
-import assert from 'node:assert/strict';
 import test from 'node:test';
+import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readableTerminalText, runnerShellCommand, terminalSubmit, CONTROL_SOURCE_REF, RUNNER_SOURCE_REF } from './runner-shell.ts';
+import { readableTerminalText, runnerShellCommand, terminalSubmit,
+  RUNNER_REPOSITORY, RUNNER_CHECKOUT } from './runner-shell.ts';
 
 const MARKER = 'COMPANION_' + 'a'.repeat(32);
 
-test('ordinary commands use a fixed adapter rather than encoded JavaScript', () => {
-  const command = runnerShellCommand('status', undefined, MARKER);
-  assert.match(command, /^node -e "/);
-  assert.ok(command.includes('runner-control.cjs'));
-  assert.ok(command.includes(' -- status ' + MARKER));
-  assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64.*toString|\$HOME|git clone/);
-  assert.ok(command.length < 900, 'status must remain a compact command');
+test('install is a plain git clone, not a remote JavaScript downloader', () => {
+  const command = runnerShellCommand('install', undefined, MARKER);
+  assert.ok(command.startsWith('git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT));
+  assert.ok(command.includes(' && node -e '), 'the local controller starts only after clone succeeds');
+  assert.ok(command.endsWith(' || echo ' + MARKER + ':1'));
+  assert.doesNotMatch(command, /raw\.githubusercontent|fetch\(|curl |wget |git reset|eval\(/);
 });
 
-test('start/stop commands use an even smaller launcher and fail explicitly if not set up', () => {
+test('updates and repairs use fast-forward-only git pull', () => {
+  for (const verb of ['update', 'reinstall'] as const) {
+    const command = runnerShellCommand(verb, undefined, MARKER);
+    assert.ok(command.startsWith('git -C ' + RUNNER_CHECKOUT + ' pull --ff-only && '));
+    assert.ok(command.endsWith(' || echo ' + MARKER + ':1'));
+    assert.doesNotMatch(command, /git reset|download|raw\.githubusercontent|force|fetch\(/);
+  }
+});
+
+test('routine operations call a local Git checkout with short Node resolver', () => {
   const command = runnerShellCommand('start', undefined, MARKER);
-  assert.ok(command.length < 500, 'routine commands should be very short');
-  assert.ok(command.includes('runner-control.cjs'));
-  const script = command.slice('node -e "'.length).split('" -- ')[0];
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-direct-'));
+  assert.ok(command.startsWith('node -e "'));
+  assert.ok(command.includes("'t3-companion','runner','bin','companion-control.cjs'"));
+  assert.ok(command.length < 500);
+  assert.doesNotMatch(command, /raw\.githubusercontent|Buffer\.from|git clone|git pull/);
+});
+
+test('project paths are encoded as inert data, never interpolated into a shell', () => {
+  const target = "/projects/ümlaut 'repo' $(touch /tmp/pwn) & whoami";
+  for (const verb of ['add', 'remove', 'inspect'] as const) {
+    const command = runnerShellCommand(verb, target, MARKER);
+    assert.ok(!command.includes(target));
+    assert.ok(!command.includes('whoami'));
+    assert.equal(Buffer.from(command.split(' ').at(-1)!, 'base64url').toString('utf8'), target);
+  }
+  assert.throws(() => runnerShellCommand('inspect', undefined, MARKER), /Project path required/);
+});
+
+test('validation prevents shell injection in marker and concurrency', () => {
+  assert.throws(() => runnerShellCommand('start', undefined, 'bad; exit 0'), /marker/);
+  assert.throws(() => runnerShellCommand('configure', '5', MARKER), /Max concurrent/);
+  assert.ok(runnerShellCommand('configure', '3', MARKER).includes(' -- configure '));
+});
+
+test('uninstalled status is read-only and reports no Runner', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-status-'));
   try {
-    const child = spawnSync(process.execPath, ['-e', script, '--', 'start', MARKER], {
-      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const source = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'status', MARKER],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    const marker = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
+    assert.ok(marker, child.stdout);
+    assert.deepEqual(JSON.parse(marker[1]), {
+      installed: false, running: false, pid: null, version: null, bridgeMissing: false, upgradeRequired: false,
     });
+    assert.ok(child.stdout.includes(MARKER + ':0'));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('legacy file-copy install is recognized for a one-time Git migration', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-'));
+  try {
+    const legacy = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    writeFileSync(legacy, '');
+    const command = runnerShellCommand('status', undefined, MARKER);
+    const source = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'status', MARKER],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /"installed":true/);
+    assert.match(child.stdout, /"bridgeMissing":true/);
+    assert.match(child.stdout, /"upgradeRequired":true/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('missing controller fails clearly instead of a T3 RPC timeout', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-missing-'));
+  try {
+    const command = runnerShellCommand('start', undefined, MARKER);
+    const source = command.slice('node -e "'.length).split('" -- ')[0];
+    const child = spawnSync(process.execPath, ['-e', source, '--', 'start', MARKER],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(child.status, 1);
-    assert.match(child.stdout, /T3_COMPANION_ERROR:/);
+    assert.match(child.stdout, /T3_COMPANION_ERROR/);
     assert.ok(child.stdout.includes(MARKER + ':1'));
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('project arguments are inert base64url data, not executable shell source', () => {
-  const target = "/projects/ümlaut 'repo' $(touch /tmp/pwn) & whoami";
-  const command = runnerShellCommand('add', target, MARKER);
-  assert.ok(!command.includes(target));
-  assert.ok(!command.includes('whoami'));
-  const encoded = command.split(' ').at(-1)!;
-  assert.equal(Buffer.from(encoded, 'base64url').toString('utf8'), target);
-  assert.throws(() => runnerShellCommand('add', undefined, MARKER), /Project path required/);
-});
-
-test('uninstalled Runner status is read-only and reports control setup required', () => {
-  const temp = mkdtempSync(path.join(os.tmpdir(), 'companion-portable-'));
+test('command wrapping works with POSIX sh and Windows PowerShell', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-shell-'));
   try {
     const command = runnerShellCommand('status', undefined, MARKER);
-    const child = spawnSync(process.execPath, ['-e', command.slice('node -e "'.length).split('" -- ')[0], '--', 'status', MARKER], {
-      env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8',
-    });
+    const child = process.platform === 'win32'
+      ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command],
+        { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 10000 })
+      : spawnSync('sh', ['-c', command], { env: { ...process.env, HOME: home },
+        encoding: 'utf8', timeout: 10000 });
     assert.equal(child.status, 0, child.stderr);
-    const line = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
-    assert.ok(line, child.stdout);
-    assert.deepEqual(JSON.parse(line[1]), { installed: false, running: false, pid: null, bridgeMissing: true });
+    assert.match(child.stdout, /T3_COMPANION_RESULT:/);
     assert.ok(child.stdout.includes(MARKER + ':0'));
-  } finally { rmSync(temp, { recursive: true, force: true }); }
-});
-
-test('installer uses a trusted repository source for the control adapter', () => {
-  const command = runnerShellCommand('install', undefined, MARKER);
-  assert.match(command, /raw\.githubusercontent\.com/);
-  assert.ok(command.includes(CONTROL_SOURCE_REF));
-  assert.equal(RUNNER_SOURCE_REF, 'main');
-  assert.ok(command.includes('runner-control.cjs'));
-  assert.doesNotMatch(command, /eval\(|Buffer\.from\(|base64/);
-});
-
-test('legacy Runner is detected as installed but requiring one-time control setup', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-'));
-  try {
-    const entry = path.join(home, '.t3', 'companion', 'runner', 'bin', 't3-runner.mjs');
-    mkdirSync(path.dirname(entry), { recursive: true });
-    writeFileSync(entry, '');
-    const command = runnerShellCommand('status', undefined, MARKER);
-    const script = command.slice('node -e "'.length).split('" -- ')[0];
-    const child = spawnSync(process.execPath, ['-e', script, '--', 'status', MARKER], {
-      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
-    });
-    assert.equal(child.status, 0, child.stderr);
-    assert.match(child.stdout, /"installed":true/);
-    assert.match(child.stdout, /"bridgeMissing":true/);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('one-time bootstrap writes and invokes a fixed adapter without eval or external network in test', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-bootstrap-'));
-  try {
-    const command = runnerShellCommand('install', undefined, MARKER);
-    const script = command.slice('node -e "'.length).split('" -- ')[0];
-    const adapter = "console.log('T3_COMPANION_RESULT:'+JSON.stringify({installed:true}));console.log(process.argv[2]+':0')";
-    const mockedFetch = 'global.fetch=async()=>({ok:true,text:async()=>'+JSON.stringify(adapter)+'});';
-    const child = spawnSync(process.execPath, ['-e', mockedFetch + script, '--', 'install', MARKER], {
-      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 15000,
-    });
-    assert.equal(child.status, 0, child.stderr);
-    assert.ok(child.stdout.includes(MARKER + ':0'));
-    assert.ok(existsSync(path.join(home, '.t3', 'companion', 'runner-control.cjs')));
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
-
-test('invalid marker is rejected', () => {
-  assert.throws(() => runnerShellCommand('status', undefined, 'bad'), /marker/);
-});
-
-test('terminal submit uses CR (PTY Enter), not LF', () => {
+test('PTY submit and terminal output normalization retain response markers', () => {
   const command = runnerShellCommand('status', undefined, MARKER);
   assert.equal(terminalSubmit(command), command + '\r');
-});
-
-test('compact status executes through POSIX sh or Windows PowerShell', () => {
-  const command = runnerShellCommand('status', undefined, MARKER);
-  const temp = mkdtempSync(path.join(os.tmpdir(), 'companion-shell-'));
-  try {
-    const child = process.platform === 'win32'
-      ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-          env: { ...process.env, HOME: temp, USERPROFILE: temp }, encoding: 'utf8', timeout: 45000,
-        })
-      : spawnSync('sh', ['-c', command], {
-          env: { ...process.env, HOME: temp }, encoding: 'utf8', timeout: 15000,
-        });
-    assert.equal(child.status, 0, [child.error?.message, child.stderr, child.stdout].filter(Boolean).join('\n'));
-    assert.ok(child.stdout.includes('T3_COMPANION_RESULT:'));
-    assert.ok(child.stdout.includes(MARKER + ':0'));
-  } finally { rmSync(temp, { recursive: true, force: true }); }
-});
-
-test('strips PTY control sequences while preserving output line boundaries', () => {
-  const raw = '\u001b]2;title\u0007\u001b[1mT3_COMPANION_RESULT:{"running":true}\r\n' + MARKER + ':0\r\n\u001b[0m';
+  const raw = '\u001b]2;title\u0007\u001b[1mT3_COMPANION_RESULT:{"running":true}\r\n' +
+    MARKER + ':0\r\n\u001b[0m';
   assert.equal(readableTerminalText(raw), 'T3_COMPANION_RESULT:{"running":true}\n' + MARKER + ':0');
-});
-
-test('update bootstraps a new controller before dispatching update to an installed legacy controller', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-update-legacy-'));
-  const root = path.join(home, '.t3', 'companion');
-  const sha = 'c'.repeat(40);
-  const currentController = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
-  const newRunner = [
-    "const command=process.argv[2];",
-    "if(command==='status')console.log(JSON.stringify({running:false,pid:null}));",
-    "else if(command==='stop')console.log(JSON.stringify({requested:true}));",
-    "else if(command==='start')console.log(JSON.stringify({pid:321}));",
-    "else{process.stderr.write('unknown command');process.exitCode=1}"
-  ].join('');
-  const payloads: Record<string, string> = {
-    'runner/bin/t3-runner.mjs': newRunner,
-    'runner/src/cli.ts': '// upgraded',
-    'runner/src/runner.ts': '// upgraded',
-    'runner/src/storage.ts': '// upgraded',
-    'runner/src/workflow.ts': '// upgraded',
-    'runner/src/t3-cli.ts': '// upgraded',
-    'runner/src/lock.ts': '// upgraded',
-    'runner/src/reconciler.ts': '// upgraded',
-    'runner/src/adapters.ts': '// upgraded',
-  };
-  try {
-    mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
-    mkdirSync(path.join(root, 'runner', 'bin'), { recursive: true });
-    // This controller is installed from main and rejects update/configure.
-    writeFileSync(path.join(root, 'runner-control.cjs'),
-      "console.log('T3_COMPANION_ERROR:Unknown Runner operation');" +
-      "console.log(process.argv[2]+':1');process.exitCode=1;");
-    for (const file of Object.keys(payloads).filter(item => item !== 'runner/src/workflow.ts'))
-      writeFileSync(path.join(root, file), file.endsWith('.mjs') ? newRunner : '// legacy');
-
-    const command = runnerShellCommand('update', undefined, MARKER);
-    assert.match(command, /raw\.githubusercontent\.com/);
-    assert.ok(command.endsWith(' -- update ' + MARKER + ' ' + RUNNER_SOURCE_REF));
-    const script = command.slice('node -e "'.length).split('" -- ')[0];
-    // Fake the control bootstrap and GitHub source downloads. No external network.
-    const mock = [
-      'const sha=' + JSON.stringify(sha) + ';',
-      'const controller=' + JSON.stringify(currentController) + ';',
-      'const payloads=' + JSON.stringify(payloads) + ';',
-      'global.fetch=async url=>{',
-      'const source=String(url);',
-      "if(source.endsWith('/runner/bin/companion-control.cjs'))return {ok:true,text:async()=>controller};",
-      "if(source.includes('/commits/'))return {ok:true,json:async()=>({sha})};",
-      "const key=source.split('/'+sha+'/')[1];",
-      "if(key&&Object.hasOwn(payloads,key))return {ok:true,text:async()=>payloads[key]};",
-      "throw Error('Unexpected fetch '+source);",
-      '};',
-    ].join('');
-    const child = spawnSync(process.execPath,
-      ['-e', mock + script, '--', 'update', MARKER, RUNNER_SOURCE_REF],
-      { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 15000 });
-    assert.equal(child.status, 0, [child.stderr, child.stdout].join('\n'));
-    const match = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
-    assert.ok(match, child.stdout);
-    const result = JSON.parse(match[1]);
-    assert.equal(result.updated, true);
-    assert.equal(result.version, sha);
-    assert.ok(existsSync(path.join(root, 'runner', 'src', 'workflow.ts')));
-    assert.equal(JSON.parse(readFileSync(path.join(root, 'runner', 'install.json'), 'utf8')).sha, sha);
-    assert.ok(!child.stdout.includes('Unknown Runner operation'));
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test('build pins the source commit instead of using main for PR-preview upgrades', () => {
-  const config = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8');
-  assert.match(config, /execFileSync\('git', \['rev-parse', 'HEAD'\]/);
-  assert.match(config, /__T3_COMPANION_SOURCE_REF__/);
-  const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
-  assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
-  assert.match(controller, /let sha = sourceRef/);
-  assert.match(controller, /if \(sourceRef === 'main'\)/);
-  assert.match(controller, /encodedTarget \|\| DEFAULT_SOURCE_REF/);
-});
-
-test('upgrade keeps new Runner if restart is blocked only by missing host T3 CLI', () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'companion-legacy-missing-cli-'));
-  const root = path.join(home, '.t3', 'companion');
-  const sha = 'd'.repeat(40);
-  const controller = readFileSync(new URL('../../../runner/bin/companion-control.cjs', import.meta.url), 'utf8');
-  const stateFile = path.join(home, 'runner-state.txt');
-  const previousRunner = [
-    "import fs from 'node:fs';",
-    "const command=process.argv[2],state=process.env.RUNNER_TEST_STATE;",
-    "if(command==='status')console.log(JSON.stringify({running:fs.readFileSync(state,'utf8')==='1'}));",
-    "else if(command==='stop'){fs.writeFileSync(state,'0');console.log(JSON.stringify({requested:true}))}",
-    "else if(command==='start'){fs.writeFileSync(state,'1');console.log(JSON.stringify({pid:123}))}",
-  ].join('');
-  const upgradedRunner = [
-    "import fs from 'node:fs';",
-    "const command=process.argv[2],state=process.env.RUNNER_TEST_STATE;",
-    "if(command==='status')console.log(JSON.stringify({running:false,pid:null,cli:{available:false}}));",
-    "else if(command==='start'){console.error('T3 CLI not found on this environment host');process.exitCode=1;}",
-    "else if(command==='stop'){fs.writeFileSync(state,'0');console.log(JSON.stringify({requested:false}));}",
-  ].join('');
-  const files: Record<string, string> = {
-    'runner/bin/t3-runner.mjs': upgradedRunner,
-    'runner/src/cli.ts': '// upgraded',
-    'runner/src/runner.ts': '// upgraded',
-    'runner/src/storage.ts': '// upgraded',
-    'runner/src/workflow.ts': '// upgraded',
-    'runner/src/t3-cli.ts': '// upgraded',
-    'runner/src/lock.ts': '// upgraded',
-    'runner/src/reconciler.ts': '// upgraded',
-    'runner/src/adapters.ts': '// upgraded',
-  };
-  try {
-    mkdirSync(path.join(root, 'runner', 'bin'), { recursive: true });
-    mkdirSync(path.join(root, 'runner', 'src'), { recursive: true });
-    writeFileSync(stateFile, '1');
-    writeFileSync(path.join(root, 'runner-control.cjs'), '// obsolete');
-    for (const file of Object.keys(files).filter(item => !item.endsWith('workflow.ts') && !item.endsWith('t3-cli.ts'))) {
-      writeFileSync(path.join(root, file), file.endsWith('.mjs') ? previousRunner : '// legacy');
-    }
-    const command = runnerShellCommand('update', undefined, MARKER);
-    const script = command.slice('node -e "'.length).split('" -- ')[0];
-    const mock = [
-      'const sha=' + JSON.stringify(sha) + ';',
-      'const controller=' + JSON.stringify(controller) + ';',
-      'const files=' + JSON.stringify(files) + ';',
-      'global.fetch=async url=>{',
-      'const input=String(url);',
-      "if(input.endsWith('/runner/bin/companion-control.cjs'))return {ok:true,text:async()=>controller};",
-      "if(input.includes('/commits/'))return {ok:true,json:async()=>({sha})};",
-      "const key=input.split('/'+sha+'/')[1];",
-      "if(key&&Object.hasOwn(files,key))return {ok:true,text:async()=>files[key]};",
-      "throw new Error('Unexpected download '+input);",
-      '};',
-    ].join('');
-    const result = spawnSync(process.execPath,
-      ['-e', mock + script, '--', 'update', MARKER, RUNNER_SOURCE_REF],
-      { env: { ...process.env, HOME: home, USERPROFILE: home, RUNNER_TEST_STATE: stateFile },
-        encoding: 'utf8', timeout: 15000 });
-    assert.equal(result.status, 0, [result.stderr, result.stdout].join('\n'));
-    const marker = result.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
-    assert.ok(marker, result.stdout);
-    const state = JSON.parse(marker[1]);
-    assert.equal(state.installed, true);
-    assert.equal(state.updated, true);
-    assert.equal(state.requiresCli, true);
-    assert.equal(state.running, false);
-    assert.equal(state.version, sha);
-    assert.ok(existsSync(path.join(root, 'runner', 'src', 't3-cli.ts')));
-    assert.equal(JSON.parse(readFileSync(path.join(root, 'runner', 'install.json'), 'utf8')).sha, sha);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
 });
