@@ -97,7 +97,7 @@ test('previous Git checkout is detected for migration to ~/t3-companion', () => 
     const child = spawnSync(process.execPath, ['-e', source, '--', 'companion', 'status', MARKER],
       { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(child.status, 0, child.stderr);
-    const result = child.stdout.match(/T3_COMPANION_RESULT:(\\{[^\\r\\n]+\\})/);
+    const result = child.stdout.match(/T3_COMPANION_RESULT:(\{[^\r\n]+\})/);
     assert.ok(result, child.stdout);
     assert.equal(JSON.parse(result[1]).bridgeMissing, true);
     assert.equal(JSON.parse(result[1]).upgradeRequired, true);
