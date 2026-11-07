@@ -19,9 +19,19 @@ const files = [
   'runner/src/storage.ts',
   'runner/src/workflow.ts',
   'runner/src/t3-cli.ts',
+  'runner/src/lock.ts',
+  'runner/src/reconciler.ts',
 ];
 // Release channel: resolve main to one immutable SHA before fetching all files.
-const coreFiles = files.filter(file => file !== 'runner/src/workflow.ts' && file !== 'runner/src/t3-cli.ts');
+// The original four-file Runner is still a valid legacy install. New modules
+// must be downloaded together, but must not cause pre-refactor installs to
+// disappear from the UI before the user can upgrade them.
+const coreFiles = [
+  'runner/bin/t3-runner.mjs',
+  'runner/src/cli.ts',
+  'runner/src/runner.ts',
+  'runner/src/storage.ts',
+];
 const fileExists = file => fs.existsSync(path.join(root, file));
 const hasLegacyRunner = () => coreFiles.every(fileExists);
 const hasCurrentRunner = () => files.every(fileExists);
