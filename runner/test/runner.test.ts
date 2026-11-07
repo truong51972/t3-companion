@@ -16,7 +16,7 @@ async function sandbox(t: any) {
 test('single projects.json registry with canonical paths', async t => {
   const { project, home } = await sandbox(t);
   await registerProject(project, home); await registerProject(project, home);
-  assert.deepEqual(await listProjects(home), [project]);
+  assert.deepEqual(await listProjects(home), [await fs.realpath(project)]);
   await unregisterProject(project, home); assert.deepEqual(await listProjects(home), []);
 });
 test('task creation produces project .t3/tasks.json and not runtime until dispatched', async t => {
@@ -108,7 +108,11 @@ test('duplicate execution request IDs fail validation without overwriting task d
   await atomicWrite(filesFor(project).tasks, doc);
   await assert.rejects(readTasks(project), /Invalid task contract/);
 });
-test('T3 adapter safely passes prompt via stdin and accepts JSON result', async t => {
+// This uses a POSIX shebang executable. Windows cannot spawn a .js file
+// directly without a native .exe, which is covered separately by CLI resolver
+// tests and real-host smoke testing.
+test('T3 adapter safely passes prompt via stdin and accepts JSON result',
+  { skip: process.platform === 'win32' ? 'POSIX shebang executable' : false }, async t => {
   const { project, home } = await sandbox(t); await registerProject(project, home);
   const tmp = path.dirname(home);
   const mock = path.join(tmp, 'mock-t3');
