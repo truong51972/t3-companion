@@ -215,8 +215,10 @@ function App() {
   const runnerMaxConcurrent = /"maxConcurrent"\s*:\s*([1-3])/.exec(runnerResult)?.[1] || '3';
   const runnerScanInterval = /"scanIntervalMs"\s*:\s*(\d+)/.exec(runnerResult)?.[1];
   const runnerUpgradeRequired = /"upgradeRequired"\s*:\s*true/.test(runnerResult);
+  const runnerCliAvailable = /"cli"\s*:\s*\{\s*"available"\s*:\s*(true|false)/.exec(runnerResult)?.[1];
+  const runnerCliCommand = /"cli"\s*:\s*\{[^}]*"command"\s*:\s*"([^"]+)"/.exec(runnerResult)?.[1];
   const runnerState = !runnerHostAvailable ? 'Needs session' : runnerError ? 'Error' : runnerBridgeMissing && runnerInstalled === 'true' ? 'Setup required' : runnerStarting ? 'Starting' : runnerInstalled === 'false'
-    ? 'Not installed' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
+    ? 'Not installed' : runnerCliAvailable === 'false' ? 'CLI unavailable' : runnerStopping ? 'Stopping' : runnerRunning === 'true' ? 'Running' : runnerRunning === 'false' ? 'Stopped' : 'Checking';
   // Cache is only a display hint. Live RPC validation remains authoritative.
   useEffect(() => {
     if (!environmentId) return;
@@ -1152,6 +1154,11 @@ function App() {
       <div className="runner-section">
         {!runnerHostAvailable && <p className="runner-hint">Open a T3 thread in this environment to manage its Runner.</p>}
         {(runnerStatusError || runnerError) && <p className="runner-error" role="alert">Could not verify Runner: {runnerStatusError || runnerError}{runnerCacheAt ? ' (showing last known status)' : ''}</p>}
+        {runnerInstalled === 'true' && runnerCliAvailable === 'false' && <div className="service-info service-info-upgrade" role="alert">
+          <span>T3 CLI was not found on this environment host. Install the T3 CLI there or configure its executable path, then refresh Runner. Existing queued tasks are preserved.</span>
+        </div>}
+        {runnerInstalled === 'true' && runnerCliAvailable === 'true' && runnerCliCommand &&
+          <span className="runner-hint" title={runnerCliCommand}>CLI: {runnerCliCommand}</span>}
         {runnerInstalled === 'true' && (runnerUpgradeRequired || !runnerScanInterval)
           ? <div className="service-info service-info-upgrade">
               <span>Legacy Runner · update to enable scheduler settings and workflow scanning.</span>
