@@ -974,7 +974,7 @@ function App() {
             </div>;
           })}
         </div>
-        <details className="overview-expander" open>
+        <details className="overview-expander">
           <summary><span className="overview-expander-title">Runner</span>
             <span className={'runner-state ' + (runnerError ? 'error' : runnerRunning === 'true' ? 'running' : runnerRunning === 'false' ? 'stopped' : '')}
               title={runnerError || undefined}>{runnerState}{runnerCacheAt ? ' · Cached' : ''}{runnerPid && runnerRunning === 'true' ? ' · PID ' + runnerPid : ''}</span>
@@ -1000,49 +1000,56 @@ function App() {
           </label>
           <span className="runner-hint">Global worker pool · scan every {runnerScanInterval ? Math.round(Number(runnerScanInterval) / 1000) + 's' : '10s'} · applies on next cycle</span>
         </div>}
-        <div className="runner-toolbar">
-          {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || !runnerHostAvailable}
-            onClick={() => void action(async () => manageRunner('install'))}>{runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up Runner controls' : 'Install & Start'}</button>}
-          {runnerInstalled === 'true' && !runnerBridgeMissing && !runnerStarting && runnerRunning === 'false' && <button className="primary"
-            disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
-          {runnerRunning === 'true' && <button disabled={busy || runnerStopping || !runnerHostAvailable}
+        <div className="service-actions" aria-label="Runner controls">
+          {(runnerInstalled === 'false' || runnerBridgeMissing) && <button className="primary" disabled={busy || runnerBusy || !runnerHostAvailable}
+            onClick={() => void action(async () => manageRunner('install'))}>
+            {runnerBridgeMissing && runnerInstalled === 'true' ? 'Set up controls' : 'Install & Start'}
+          </button>}
+          {runnerInstalled === 'true' && !runnerBridgeMissing && !runnerStarting && runnerRunning === 'false' &&
+            <button className="primary" disabled={busy || runnerBusy || !runnerHostAvailable}
+              onClick={() => void action(async () => manageRunner('start'))}>Start</button>}
+          {runnerRunning === 'true' && <button disabled={busy || runnerBusy || runnerStopping || !runnerHostAvailable}
             onClick={() => void action(async () => manageRunner('stop'))}>{runnerStopping ? 'Stopping…' : 'Stop'}</button>}
-          {runnerInstalled === 'true' && !runnerBridgeMissing && <>
-            <button disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('update'))}>Update</button>
-            <button disabled={busy || !runnerHostAvailable}
-              onClick={() => setConfirmation({
-                title: 'Re-install Runner?',
-                description: 'Runner will drain active tasks, replace its executable files, and restart if it was running. Project registration, tasks and execution history are preserved.',
-                confirmLabel: 'Re-install', run: async () => manageRunner('reinstall'),
-              })}>Re-install</button>
-          </>}
-          {runnerInstalled === 'true' && <details ref={runnerProjectsMenu} className="runner-more">
-            <summary aria-label="Manage Runner projects">Projects <span aria-hidden="true">⌄</span></summary>
-            <div className="runner-menu">
-              <button disabled={busy || !runnerHostAvailable} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void action(async () => manageRunner('add')); }}>Register current project</button>
-              <button disabled={busy || !runnerHostAvailable} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void action(async () => manageRunner('remove')); }}>Unregister current project</button>
-            </div>
-          </details>}
-          {runnerInstalled === 'true' && <label className="runner-autostart">
-            <input type="checkbox" checked={runnerAutoStart} disabled={!environmentId}
-              onChange={event => {
-                const enabled = event.target.checked;
-                runnerAutoStartRef.current = enabled;
-                setRunnerAutoStart(enabled);
-                void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
-              }}/>
-            <span>Auto-start</span>
-          </label>}
+          <ServiceRefresh service="Runner" refreshing={runnerBusy}
+            disabled={busy || !runnerHostAvailable}
+            onRefresh={() => void action(async () => manageRunner('status'))}/>
+          {runnerInstalled === 'true' && !runnerBridgeMissing &&
+            <ServiceMore service="Runner" menuRef={runnerActionsMenu}>
+              <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
+                onClick={() => { runnerActionsMenu.current?.removeAttribute('open'); void action(async () => manageRunner('update')); }}>Update Runner</button>
+              <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
+                onClick={() => {
+                  runnerActionsMenu.current?.removeAttribute('open');
+                  setConfirmation({
+                    title: 'Re-install Runner?',
+                    description: 'Runner will drain active tasks, replace its executable files, and restart if it was running. Project registration, tasks and execution history are preserved.',
+                    confirmLabel: 'Re-install', run: async () => manageRunner('reinstall'),
+                  });
+                }}>Re-install Runner</button>
+              <div className="service-menu-divider" role="separator"/>
+              <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
+                onClick={() => { runnerActionsMenu.current?.removeAttribute('open'); void action(async () => manageRunner('add')); }}>Register project</button>
+              <button type="button" disabled={busy || runnerBusy || !runnerHostAvailable}
+                onClick={() => { runnerActionsMenu.current?.removeAttribute('open'); void action(async () => manageRunner('remove')); }}>Unregister project</button>
+              <label className="runner-autostart">
+                <input type="checkbox" checked={runnerAutoStart} disabled={!environmentId}
+                  onChange={event => {
+                    const enabled = event.target.checked;
+                    runnerAutoStartRef.current = enabled;
+                    setRunnerAutoStart(enabled);
+                    void chrome.storage.local.set({ ['runnerAutoStartDisabled:' + environmentId]: !enabled });
+                  }}/>
+                <span>Auto-start when connected</span>
+              </label>
+              <details className="service-help"><summary>Diagnostics</summary>
+                <pre className="runner-result">{runnerResult}</pre>
+              </details>
+            </ServiceMore>}
         </div>
-        <details className="runner-output"><summary>Diagnostics</summary>
-          <pre className="runner-result">{runnerResult}</pre>
-        </details>
       </div>
-            <button type="button" className="runner-refresh" aria-label="Refresh Runner status" title="Refresh Runner status"
-              disabled={busy || !runnerHostAvailable} onClick={() => void action(async () => manageRunner('status'))}>↻ Refresh Runner</button>
           </div>
         </details>
-        <details className="overview-expander" open>
+        <details className="overview-expander">
           <summary><span className="overview-expander-title">Agent Skill</span>
             <span className={'skill-state ' + (skillState === 'installed' ? 'installed' : '')}>
               {skillState === 'installed' ? 'Installed' : skillState === 'not_installed' ? 'Not installed'
@@ -1053,22 +1060,33 @@ function App() {
             <p className="overview-description">Manage project tasks using the installed agent skill. Installation is scoped to this project.</p>
             {skillCacheAt && <p className="runner-hint">Cached · Last verified {new Date(skillCacheAt).toLocaleTimeString()}</p>}
             {skillError && <p className="runner-error" role="alert">{skillError}</p>}
-            <div className="runner-toolbar">
-              {skillState !== 'installed' && <button className="primary" disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
+            <div className="service-actions" aria-label="Agent Skill controls">
+              {skillState !== 'installed' && <button className="primary"
+                disabled={busy || skillBusy || !runnerHostAvailable || skillState === 'checking'}
                 onClick={() => void action(async () => manageSkill('install'))}>{skillBusy ? 'Installing…' : 'Install Skill'}</button>}
-              {skillState === 'installed' && <>
-                <button disabled={busy || skillBusy || !runnerHostAvailable} onClick={() => void action(async () => manageSkill('update'))}>Update</button>
-                <button disabled={busy || skillBusy || !runnerHostAvailable}
-                  onClick={() => setConfirmation({
-                    title: 'Re-install Agent Skill?',
-                    description: 'The Agent Skill will be re-installed in the current project. Existing task files are preserved.',
-                    confirmLabel: 'Re-install', run: async () => manageSkill('reinstall'),
-                  })}>Re-install</button>
-              </>}
-              <button type="button" disabled={busy || skillBusy} onClick={() => void action(async () => manageSkill('status'))}>Refresh</button>
+              <ServiceRefresh service="Agent Skill" refreshing={skillBusy || skillState === 'checking'}
+                disabled={busy || !tabId || !environmentId || !currentProject || !recognized}
+                onRefresh={() => void action(async () => manageSkill('status'))}/>
+              {skillState === 'installed' &&
+                <ServiceMore service="Agent Skill" menuRef={skillActionsMenu}>
+                  <button type="button" disabled={busy || skillBusy || !runnerHostAvailable}
+                    onClick={() => { skillActionsMenu.current?.removeAttribute('open'); void action(async () => manageSkill('update')); }}>Update Skill</button>
+                  <button type="button" disabled={busy || skillBusy || !runnerHostAvailable}
+                    onClick={() => {
+                      skillActionsMenu.current?.removeAttribute('open');
+                      setConfirmation({
+                        title: 'Re-install Agent Skill?',
+                        description: 'The Agent Skill will be re-installed in the current project. Existing task files are preserved.',
+                        confirmLabel: 'Re-install', run: async () => manageSkill('reinstall'),
+                      });
+                    }}>Re-install Skill</button>
+                </ServiceMore>}
             </div>
-            <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
-            <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
+            <details className="service-help">
+              <summary>Manual setup</summary>
+              <p className="runner-hint">Installs into the selected project via npx skills. Requires Node.js 22.20+ and an open T3 thread for one-click setup.</p>
+              <code className="skill-command">npx skills add truong51972/t3-companion --skill t3-companion -y</code>
+            </details>
           </div>
         </details>
         <details className="overview-expander data-settings">
