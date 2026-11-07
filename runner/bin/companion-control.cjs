@@ -1,5 +1,5 @@
 'use strict';
-// Git-checkout local controller; durable runtime is in ~/.t3/runner.
+// Git-checkout local controller; durable Runner state lives under .data/runner.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawnSync}=require('node:child_process');
 const [verb,marker,encodedTarget]=process.argv.slice(2);
@@ -8,7 +8,10 @@ const entry=path.join(checkout,'runner','bin','t3-runner.mjs');
 const legacyEntry=path.join(os.homedir(),'.t3','companion','runner','bin','t3-runner.mjs');
 const previousCheckoutEntry=path.join(os.homedir(),'.t3','t3-companion','runner','bin','t3-runner.mjs');
 const home=path.resolve(process.env.T3_COMPANION_HOME||
-  path.join(process.env.T3CODE_HOME||path.join(os.homedir(),'.t3'),'runner'));
+  path.join(checkout,'.data','runner'));
+const legacyHome=path.resolve(path.join(process.env.T3CODE_HOME||
+  path.join(os.homedir(),'.t3'),'runner'));
+const importOld=!process.env.T3_COMPANION_HOME && legacyHome!==home;
 const required=['runner/bin/t3-runner.mjs','runner/src/cli.ts','runner/src/runner.ts',
   'runner/src/storage.ts','runner/src/workflow.ts','runner/src/t3-cli.ts',
   'runner/src/lock.ts','runner/src/reconciler.ts','runner/src/adapters.ts'];
@@ -23,9 +26,9 @@ function git(...args){
   const child=spawnSync('git',['-C',checkout,...args],{encoding:'utf8',timeout:5000,windowsHide:true});
   return child.status===0?child.stdout.trim():null;
 }
-function lockStatus(){
+function lockStatus(root=home){
   try{
-    const owner=JSON.parse(fs.readFileSync(path.join(home,'runner.lock','owner.json'),'utf8'));
+    const owner=JSON.parse(fs.readFileSync(path.join(root,'runner.lock','owner.json'),'utf8'));
     if(!Number.isSafeInteger(owner.pid)||owner.pid<=0)return {running:false,pid:null};
     try{process.kill(owner.pid,0);return {running:true,pid:owner.pid}}
     catch(e){if(e.code==='EPERM')return {running:true,pid:owner.pid};
@@ -43,7 +46,12 @@ function state(extra={}){
     if(!/ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package/i.test(String(e)))throw e;
     data={...lockStatus(),incompleteInstall:true};
   }
+  const old=importOld?lockStatus(legacyHome):{running:false,pid:null};
   return {...data,installed:true,bridgeMissing:false,version,upgradeRequired:!complete||!version,
+    running:!!(data.running||old.running),pid:data.running?data.pid:old.pid,
+    legacyRunnerRunning:old.running,
+    migrationPending:importOld && fs.existsSync(legacyHome) &&
+      !fs.existsSync(path.join(home,'.legacy-import.json')),
     checkoutDirty:git('status','--porcelain')!=='',originTrusted:trusted,...extra};
 }
 function target(){
@@ -53,9 +61,42 @@ function target(){
   return decoded;
 }
 function sleep(ms){Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}
+function importLegacyData(){
+  if(!importOld||!fs.existsSync(legacyHome))return;
+  const marker=path.join(home,'.legacy-import.json');
+  if(fs.existsSync(marker))return;
+  if(lockStatus(legacyHome).running){
+    fs.writeFileSync(path.join(legacyHome,'stop.json'),
+      JSON.stringify({at:new Date().toISOString()}),{mode:0o600});
+    throw Error('Previous Runner is draining work; retry Start after it stops');
+  }
+  // Import regular files only, skipping locks, signals and stale heartbeats.
+  // Never overwrite a conflicting destination or remove the old state.
+  const transient=new Set(['runner.lock','stop.json','health.json','.legacy-import.json']);
+  function copyDirectory(from,to){
+    fs.mkdirSync(to,{recursive:true,mode:0o700});
+    for(const file of fs.readdirSync(from,{withFileTypes:true})){
+      if(transient.has(file.name)||file.name.endsWith('.tmp'))continue;
+      const source=path.join(from,file.name),destination=path.join(to,file.name);
+      if(file.isDirectory()){copyDirectory(source,destination);continue}
+      if(!file.isFile())continue;
+      if(fs.existsSync(destination)){
+        if(!fs.readFileSync(source).equals(fs.readFileSync(destination)))
+          throw Error('Runner data conflict at '+destination+'; reconcile manually');
+        continue;
+      }
+      fs.copyFileSync(source,destination,fs.constants.COPYFILE_EXCL);
+      fs.chmodSync(destination,0o600);
+    }
+  }
+  copyDirectory(legacyHome,home);
+  fs.writeFileSync(marker,JSON.stringify({source:legacyHome,importedAt:new Date().toISOString()}),
+    {flag:'wx',mode:0o600});
+}
 function start(){
-  // Before reusing an existing PID, ensure it is not a worker from the old checkout.
+  // A legacy Runner may be running against the old data path.
   migrateLegacy();
+  importLegacyData();
   if(lockStatus().running)return state();
   try{run('start')}catch(e){
     if(/T3 CLI not found|T3 CLI executable|T3_COMPANION_T3_BIN/i.test(String(e)))
@@ -89,7 +130,15 @@ function main(){
   if(verb==='install')return start();
   if(verb==='status')return state();
   if(verb==='start')return start();
-  if(verb==='stop')return state({stopRequested:run('stop').requested});
+  if(verb==='stop'){
+    let requested=run('stop').requested;
+    if(importOld&&lockStatus(legacyHome).running){
+      fs.writeFileSync(path.join(legacyHome,'stop.json'),
+        JSON.stringify({at:new Date().toISOString()}),{mode:0o600});
+      requested=true;
+    }
+    return state({stopRequested:requested});
+  }
   if(verb==='configure'){
     const value=target();if(!/^[1-3]$/.test(value))throw Error('Max concurrent must be 1..3');
     run('config','set',value);return state();

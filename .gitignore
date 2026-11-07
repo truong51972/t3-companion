@@ -1,6 +1,7 @@
 node_modules/
 extension/dist/
 runner/dist/
+.data/
 *.log
 coverage/
 .DS_Store

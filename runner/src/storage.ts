@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'awaiting_merge' | 'done';
 export type ExecutionStatus = 'dispatching' | 'completed' | 'blocked' | 'failed' | 'needs_reconciliation';
@@ -13,7 +13,10 @@ export interface Task { id: string; title: string; prompt: string; description?:
 export interface TaskDocument { version: 1; tasks: Task[] }
 export interface RuntimeRecord { taskId: string; status: ExecutionStatus; startedAt: string; finishedAt?: string; threadId?: string | null; runId?: string | null; reply?: string | null; error?: string | null; workflowStage?: import('./workflow.ts').WorkflowStage; pendingRequestCount?: number; changeRequests?: import('./workflow.ts').ChangeRequest[]; lastInspectedAt?: string }
 export interface RuntimeDocument { version: 1; requests: Record<string, RuntimeRecord> }
-export const defaultHome = () => path.resolve(process.env.T3_COMPANION_HOME || path.join(process.env.T3CODE_HOME || path.join(homedir(), '.t3'), 'runner'));
+// Durable state lives beside Companion code, not in T3's global user directory.
+export const defaultHome = () => path.resolve(
+  process.env.T3_COMPANION_HOME || fileURLToPath(new URL('../../.data/runner/', import.meta.url))
+);
 export const registryPath = (home: string) => path.join(home, 'projects.json');
 export type RunnerSettings = { maxConcurrent: number; scanIntervalMs: number };
 export const DEFAULT_RUNNER_SETTINGS: RunnerSettings = { maxConcurrent: 3, scanIntervalMs: 10_000 };
