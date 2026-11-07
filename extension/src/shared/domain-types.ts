@@ -174,7 +174,13 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
   const stopping = stopRequested && running;
   const pid = typeof parsed?.pid === 'number' ? parsed.pid : null;
   const version = typeof parsed?.version === 'string' ? parsed.version : null;
-  const scanIntervalMs = typeof parsed?.scanIntervalMs === 'number' ? parsed.scanIntervalMs : null;
+  // Runner CLI reports { settings: { maxConcurrent, scanIntervalMs } }.
+  // Top-level values are accepted only for backward compatibility.
+  const settings = parsed?.settings && typeof parsed.settings === 'object' &&
+    !Array.isArray(parsed.settings) ? parsed.settings as Record<string, unknown> : null;
+  const rawInterval = settings?.scanIntervalMs ?? parsed?.scanIntervalMs;
+  const scanIntervalMs = typeof rawInterval === 'number' && Number.isInteger(rawInterval) &&
+    rawInterval >= 1000 && rawInterval <= 60000 ? rawInterval : null;
   const upgradeRequired = parsed?.upgradeRequired === true;
   const requiresCli = parsed?.requiresCli === true;
 
@@ -182,8 +188,9 @@ export function parseRunnerState(raw: string, hostAvailable: boolean): ParsedRun
   const cliAvailable = cliObj ? cliObj.available !== false : true;
   const cliCommand = typeof cliObj?.command === 'string' ? cliObj.command : null;
 
-  const rawConcurrent = parsed?.maxConcurrent;
-  const maxConcurrent = typeof rawConcurrent === 'number' && rawConcurrent >= 1 && rawConcurrent <= 3 ? rawConcurrent : 3;
+  const rawConcurrent = settings?.maxConcurrent ?? parsed?.maxConcurrent;
+  const maxConcurrent = typeof rawConcurrent === 'number' && Number.isInteger(rawConcurrent) &&
+    rawConcurrent >= 1 && rawConcurrent <= 3 ? rawConcurrent : 3;
 
   let label: ParsedRunnerState['label'] = 'Checking';
   if (!hostAvailable) {
