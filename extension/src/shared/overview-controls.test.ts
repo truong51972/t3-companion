@@ -72,13 +72,14 @@ test('service panels do not show a disabled legacy setting or redundant metadata
   assert.match(css, /\.overview-expander \.runner-config\{[\s\S]*?border:0;background:transparent/);
 });
 
-test('all disclosure arrows use one aligned SVG chevron with stateful rotation', () => {
+test('all remaining disclosure arrows use one aligned SVG chevron with stateful rotation', () => {
   assert.match(code, /function Chevron\(/);
   assert.match(code, /<path d="m6 9 6 6 6-6"\/>/);
   for (const label of ['Runner', 'Agent Skill', 'Browser Data'])
     assert.ok(code.includes('<summary><Chevron/><span className="overview-expander-title">' + label + '</span>'));
   assert.match(code, /<Chevron className=\{'lane-chevron' \+ \(expanded \? ' is-open' : ''\)\}\/>/);
-  assert.match(code, /<summary>Advanced options<Chevron\/><\/summary>/);
+  assert.match(code, /className="task-execution-header"/);
+  assert.doesNotMatch(code, /<QueueModal/);
   assert.match(code, /<summary><Chevron\/>Diagnostics<\/summary>/);
   assert.match(code, /<summary><Chevron\/>Manual setup<\/summary>/);
   assert.match(css, /\.disclosure-chevron\{[\s\S]*?transform:rotate\(-90deg\)/);
