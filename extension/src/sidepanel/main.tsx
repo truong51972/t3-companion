@@ -541,11 +541,19 @@ function App() {
     setEditing(null);
   }
   async function enqueue(task: Task) {
+    // Automatically register before persisting work; otherwise newly queued
+    // project tasks can remain forever invisible to an installed Runner.
+    // Registration is idempotent and happens only for a verified installation.
+    if (runnerInstalled === 'true' && !runnerBridgeMissing && runnerHostAvailable)
+      await manageRunner('add');
     const when = schedule ? new Date(schedule).toISOString() : undefined;
     await mutateTask(task.id, document => ({ ...document, tasks: document.tasks.map(t => t.id === task.id
       ? { ...t, status: 'todo' as Status, statusOverride: false, executionRequests: [...(t.executionRequests || []), { requestId: crypto.randomUUID(), ...(when ? { notBefore: when } : {}), ...(workspaceMode !== 'root' && worktree.trim() ? { worktree: worktree.trim() } : {}), workspace: workspaceMode }] }
       : t) }), task);
-    setSchedule(''); setNotice('Request queued; Runner will dispatch when eligible.');
+    setSchedule('');
+    const ready = runnerInstalled === 'true' && runnerRunning === 'true' && runnerHostAvailable;
+    setNotice(ready ? 'Queued. Runner will dispatch when eligible.' :
+      'Queued. Open Overview to verify Runner setup and project registration before execution.');
   }
   const taskExecution = (task: Task) => {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
@@ -1032,6 +1040,7 @@ function App() {
         <button type="button" className="icon-button" aria-label="Close execution dialog" onClick={() => setQueueTarget(null)}>×</button></div>
       <div className="modal-content">
         <p className="modal-intro">This creates an execution request. The task title stays on the Board; only its Agent Prompt is sent to T3.</p>
+        {runnerRunning !== 'true' && <p className="queue-warning">Runner is not confirmed running in this environment. Requests remain queued until Runner starts and the project is registered.</p>}
         <label>Workspace
           <select value={workspaceMode} onChange={e => {
             const mode = e.target.value as WorkspaceMode;
