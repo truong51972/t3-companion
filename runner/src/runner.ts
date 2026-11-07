@@ -150,7 +150,7 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
     const now = Date.now();
     const items = Object.entries(snapshot.requests)
       .filter(([, entry]) => Boolean(entry.threadId) &&
-        ['completed', 'blocked', 'failed', 'needs_reconciliation'].includes(entry.status) &&
+        ['dispatching', 'completed', 'blocked', 'failed', 'needs_reconciliation'].includes(entry.status) &&
         entry.workflowStage !== 'done' &&
         (!entry.lastInspectedAt || now - Date.parse(entry.lastInspectedAt) >= INSPECT_INTERVAL_MS))
       .slice(0, 4);
