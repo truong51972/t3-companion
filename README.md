@@ -35,7 +35,7 @@ Choose a T3 project, manage tasks on the default **Board** tab, and inspect **Ov
 
 ### Runner setup — Windows, WSL and Linux
 
-Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment host.
+Runner needs Node.js **22.16+** and a **T3 Code CLI executable on the selected execution host** (not merely an authenticated T3 Web session). T3's official installer puts the binary under `~/.local/bin`. Runner now resolves `t3` from PATH and that installation directory even when started from a non-login process; `T3_COMPANION_T3_BIN` can override it with an absolute executable path. Runner refuses to claim new requests if no CLI is found. See [T3 Code's installation instructions](https://github.com/pingdotgg/t3code/blob/main/docs/user/install.md#command-line).
 
 1. Open a T3 thread in the environment and select the project in Companion.
 2. Open **Overview → Runner** (collapsed by default). The Side Panel checks its status automatically after the initial UI render. Expand Runner for Start/Stop and Refresh; less frequent maintenance commands are under **More**.
@@ -44,7 +44,9 @@ Runner needs Node.js **22.16+** and the `t3` CLI on the selected T3 environment 
 
 Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\.t3\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
-Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host's execution environment, setup/start reports an error; install those prerequisites first.
+Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host, setup/start now reports an actionable error. Runner does not auto-download a different T3 version or silently fail queued tasks. Install the CLI on that same host, then refresh Runner and Start. If an old execution already failed with `spawn t3 ENOENT`, queue a **new** execution request; Runner does not replay historical failed requests automatically.
+
+**Diagnose missing CLI:** On Linux/WSL check `command -v t3` and `ls -l ~/.local/bin/t3`; on Windows PowerShell check `Get-Command t3` or `Test-Path "$HOME\\.local\\bin\\t3.exe"`. The executable must exist on the environment host running Runner, not just on your browser machine. To use a nonstandard location, export `T3_COMPANION_T3_BIN=/absolute/path/to/t3` before starting Runner. A non-login PATH missing `~/.local/bin` is handled automatically by the current Runner. Update from Overview to obtain this fix. If you upgrade while the CLI is unavailable, the updated Runner stays installed but stopped until you install the CLI and start it.
 
 **Known MVP limitation — shell history:** T3's available terminal RPC uses a PTY (`terminal.open` / `terminal.write` / `terminal.observe`), not a headless command endpoint. Companion invokes a short Node launcher for routine Runner actions and a fixed project-scoped `npx skills add` wrapper. Only target paths are encoded as inert base64url arguments; no executable JavaScript is base64-encoded or evaluated. The host shell may retain these commands in PowerShell/Bash/Zsh history; Companion never alters history.
 
