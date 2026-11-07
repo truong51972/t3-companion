@@ -2,7 +2,8 @@
 export type RunnerVerb = 'install' | 'update' | 'reinstall' | 'status' | 'start' | 'stop' | 'add' | 'remove' | 'inspect' | 'configure';
 export const RUNNER_REPOSITORY = 'https://github.com/truong51972/t3-companion.git';
 export const RUNNER_CHECKOUT = '~/.t3/t3-companion';
-const ENTRY = "require(require('node:path').join(require('node:os').homedir(),'.t3','t3-companion','runner','bin','companion-control.cjs'))";
+const ENTRY = "try{require(require('node:path').join(require('node:os').homedir(),'.t3','t3-companion','runner','bin','companion-control.cjs'))}" +
+  "catch(e){console.log('T3_COMPANION_ERROR:'+String(e.message||e).slice(-500));console.log(process.argv[2]+':1');process.exitCode=1}";
 const STATUS = "const p=require('node:path'),h=require('node:os').homedir(),f=require('node:fs'),s=p.join(h,'.t3','t3-companion','runner','bin','companion-control.cjs');" +
   "if(f.existsSync(s))require(s);else{const legacy=f.existsSync(p.join(h,'.t3','companion','runner','bin','t3-runner.mjs'));" +
   "let pid=null,running=false;try{pid=JSON.parse(f.readFileSync(p.join(h,'.t3','runner','runner.lock','owner.json'),'utf8')).pid;process.kill(pid,0);running=true}catch{}" +
@@ -20,7 +21,7 @@ export function runnerShellCommand(verb: RunnerVerb, target: string | undefined,
   const args = [actualVerb, marker, ...(target === undefined ? [] : [encodeTarget(target)])];
   const control = 'node -e "' + (verb === 'status' ? STATUS : ENTRY) + '" -- ' + args.join(' ');
   if (verb === 'install')
-    return 'git clone --depth 1 ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT +
+    return 'git clone ' + RUNNER_REPOSITORY + ' ' + RUNNER_CHECKOUT +
       ' && ' + control + ' || echo ' + marker + ':1';
   if (verb === 'update' || verb === 'reinstall')
     return 'git -C ' + RUNNER_CHECKOUT + ' pull --ff-only && ' + control + ' || echo ' + marker + ':1';
