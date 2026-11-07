@@ -11,7 +11,7 @@ import '../shared/styles.css';
 import './sidepanel.css';
 
 type Status = 'todo' | 'in_progress' | 'review' | 'done';
-type Task = { id: string; title: string; description?: string; prompt: string; status: Status; priority?: number;
+type Task = { id: string; title: string; description?: string; prompt: string; status: Status; statusOverride?: boolean; priority?: number;
   executionRequests?: { requestId: string; notBefore?: string; worktree?: string; workspace?: WorkspaceMode }[] };
 type Tasks = { version: 1; tasks: Task[] };
 type Runtime = { version: 1; requests: Record<string, { taskId: string; status: string; threadId?: string | null; error?: string | null; startedAt?: string; finishedAt?: string }> };
@@ -504,7 +504,7 @@ function App() {
   async function enqueue(task: Task) {
     const when = schedule ? new Date(schedule).toISOString() : undefined;
     await mutateTask(task.id, document => ({ ...document, tasks: document.tasks.map(t => t.id === task.id
-      ? { ...t, executionRequests: [...(t.executionRequests || []), { requestId: crypto.randomUUID(), ...(when ? { notBefore: when } : {}), ...(workspaceMode !== 'root' && worktree.trim() ? { worktree: worktree.trim() } : {}), workspace: workspaceMode }] }
+      ? { ...t, status: 'todo' as Status, statusOverride: false, executionRequests: [...(t.executionRequests || []), { requestId: crypto.randomUUID(), ...(when ? { notBefore: when } : {}), ...(workspaceMode !== 'root' && worktree.trim() ? { worktree: worktree.trim() } : {}), workspace: workspaceMode }] }
       : t) }), task);
     setSchedule(''); setNotice('Request queued; Runner will dispatch when eligible.');
   }
@@ -512,7 +512,7 @@ function App() {
     const req = task.executionRequests?.at(-1); return req ? runtime.requests[req.requestId] : null;
   };
   const taskColumn = (task: Task): Status => {
-    if (task.status === 'done' || task.status === 'review') return task.status;
+    if (task.statusOverride || task.status === 'done' || task.status === 'review') return task.status;
     const status = taskExecution(task)?.status;
     if (status === 'dispatching') return 'in_progress';
     if (status === 'completed' || status === 'blocked' || status === 'failed' || status === 'needs_reconciliation')
@@ -544,7 +544,7 @@ function App() {
   async function moveTask(task: Task, status: Status, beforeTaskId?: string) {
     if (beforeTaskId === task.id) return;
     await mutateTask(task.id, document => {
-      const updated = { ...task, status };
+      const updated = { ...task, status, statusOverride: true };
       const remaining = document.tasks.filter(t => t.id !== task.id);
       const at = beforeTaskId ? remaining.findIndex(t => t.id === beforeTaskId) : -1;
       remaining.splice(at === -1 ? remaining.length : at, 0, updated);
@@ -722,7 +722,7 @@ function App() {
                       <summary aria-label={'More actions for ' + task.title} title="More actions">•••</summary>
                       <div className="task-menu">
                         <label>Move to<select aria-label={'Move ' + task.title} value={task.status}
-                          onChange={e => void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status: e.target.value as Status } : t) }), task))}>
+                          onChange={e => void action(async () => mutateTask(task.id, d => ({ ...d, tasks: d.tasks.map(t => t.id === task.id ? { ...t, status: e.target.value as Status, statusOverride: true } : t) }), task))}>
                           {columns.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                         </select></label>
                         <div className="menu-actions">
