@@ -42,7 +42,7 @@ test('status does not install anything and returns a stable JSON envelope', t =>
   const { run } = fixture(t);
   const response = run('status');
   assert.equal(response.status, 0, response.stderr);
-  assert.deepEqual(response.result, { installed: false, running: false, pid: null });
+  assert.deepEqual(response.result, { installed: false, running: false, pid: null, version: null });
   assert.ok(response.stdout.includes(marker + ':0'));
 });
 
@@ -51,6 +51,7 @@ test('start / stop and registered paths work without shell interpretation', t =>
   installStub();
   const initially = run('status');
   assert.equal(initially.result.running, false);
+  assert.equal(initially.result.version, null);
   const started = run('start');
   assert.equal(started.status, 0, started.stderr);
   assert.equal(started.result.running, true);
