@@ -17,6 +17,18 @@ function readSidepanelCode(dir: string): string {
 const code = readSidepanelCode(fileURLToPath(new URL('../sidepanel', import.meta.url)));
 const css = readFileSync(new URL('../sidepanel/sidepanel.css', import.meta.url), 'utf8');
 
+test('transient menu dismissal never closes content expanders', () => {
+  const menuCode = readFileSync(new URL('../sidepanel/hooks/useMenuDismissal.ts', import.meta.url), 'utf8');
+  assert.match(menuCode, /details\.connection-settings\[open\]/);
+  assert.match(menuCode, /details\.service-more\[open\]/);
+  assert.match(menuCode, /details\.task-more\[open\]/);
+  assert.doesNotMatch(menuCode, /querySelectorAll<HTMLDetailsElement>\('details\[open\]'\)/);
+  assert.match(menuCode, /DISMISSABLE_MENU_SELECTOR/);
+  assert.doesNotMatch(menuCode, /details\.overview-expander\[open\]/);
+  assert.doesNotMatch(menuCode, /details\.advanced-options\[open\]/);
+  assert.doesNotMatch(menuCode, /details\.service-help\[open\]/);
+});
+
 test('Runner and Agent Skill expander start collapsed and expose status in summary', () => {
   assert.match(code, /<details className="overview-expander">\s*<summary><Chevron\/><span className="overview-expander-title">Runner<\/span>/);
   assert.match(code, /<details className="overview-expander">\s*<summary><Chevron\/><span className="overview-expander-title">Agent Skill<\/span>/);
