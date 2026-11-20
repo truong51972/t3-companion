@@ -50,13 +50,11 @@ function gitOutput(project: string, args: string[]): string | null {
 
 export function workspaceBaseFor(project: string, request: ExecutionRequest): string | null {
   const configuration = request.execution;
-  if (configuration?.workspace === 'root' || request.workspace === 'root') return null;
-  // An explicit worktree ref from the v1 contract always opts into isolation.
-  const explicit = configuration ? configuration.baseRef?.trim() : request.worktree?.trim();
-  if (!configuration && !request.workspace && !explicit) return null; // legacy stays on shared checkout
+  if (configuration.workspace === 'root') return null;
+  const explicit = configuration.baseRef?.trim();
   const isRepo = gitOutput(project, ['rev-parse', '--is-inside-work-tree']) === 'true';
   if (!isRepo) {
-    if ((configuration?.workspace || request.workspace) === 'auto' && !explicit) return null; // non-Git use root
+    if (configuration.workspace === 'auto' && !explicit) return null; // non-Git use root
     throw new Error('Worktree execution requires a Git repository');
   }
   const branch = explicit ||
@@ -164,13 +162,11 @@ export async function runRunner({ home = defaultHome(), once = false, intervalMs
             if (active.size >= poolLimit || stopping) break;
             if (await fs.stat(stopFile(home)).then(() => true, () => false)) { stopping = true; break; }
             if (runtime.requests[request.requestId]) continue;
-            const notBefore = request.notBefore || request.execution?.notBefore;
+            const notBefore = request.execution.notBefore;
             if (notBefore && (Number.isNaN(Date.parse(notBefore)) || Date.parse(notBefore) > Date.now())) continue;
-            const workspace = request.execution?.workspace || request.workspace;
-            const sharedCheckout = workspace === 'root' ? true
-              : workspace === 'auto' ? gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true'
-              : workspace === 'worktree' ? false
-              : !request.worktree; // legacy behavior
+            const workspace = request.execution.workspace;
+            const sharedCheckout = workspace === 'root' ||
+              (workspace === 'auto' && gitOutput(project, ['rev-parse', '--is-inside-work-tree']) !== 'true');
             if (sharedCheckout && nonWorktreeProjects.has(project)) continue;
             const id = `${project}:${request.requestId}`;
             const claimed = await updateRuntime(project, current => {

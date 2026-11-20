@@ -15,7 +15,7 @@ const usage = `t3-runner <command>
   start | stop | status
   inspect <project-path>  # read-only Git/worktree discovery
   config get | config set <max-concurrent 1..3>
-Environment: T3_COMPANION_HOME, T3CODE_HOME, T3_COMPANION_T3_BIN`;
+Environment: T3_COMPANION_HOME, T3_COMPANION_T3_BIN`;
 const opt = (name: string) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1]; };
 try {
   let result: unknown;

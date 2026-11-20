@@ -39,10 +39,10 @@ Runner needs Node.js **22.16+** and a **T3 Code CLI executable on the selected e
 
 1. Open a T3 thread in the environment and select the project in Companion.
 2. Open **Overview → Runner** (collapsed by default). The Side Panel checks its status automatically after the initial UI render. Expand Runner for Start and Refresh; Stop and maintenance commands are under **More**.
-3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/t3-companion/` on the selected execution host and starts the bundled Runner. Existing registered projects, tasks and runtime history are preserved under `~/t3-companion/.data/runner/`. Legacy installs (including the prior Git checkout in `~/.t3/t3-companion`) show **Setup required**; choose **Set up controls** to clone into the new location and migrate without deleting the previous installation.
+3. If missing, click **Install & Start Runner**. Companion clones the repository into `~/t3-companion/` on the selected execution host and starts the bundled Runner. New Runner data is stored under `~/t3-companion/.data/runner/`. Existing task definitions remain in each project's `.t3/` directory. Older Runner registries must be copied manually before starting the new checkout.
 4. If installed but stopped, the Side Panel attempts to start it once on connection when Auto-start is enabled. There is **no Side Panel Runner status polling**. Use the Runner expander's **Refresh Runner** button to check again. Manual **Stop** disables auto-start for that environment until **Start** is used or the toggle is re-enabled.
 
-Runtime state remains under `~/.t3/runner/` (Windows: `%USERPROFILE%\t3-companion\.data\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
+Runtime state lives under `~/t3-companion/.data/runner/` (Windows: `%USERPROFILE%\t3-companion\.data\runner\`). Runner continues working after closing the Side Panel/browser; **automatic restart is not provided when the browser and Side Panel are closed**. This is deliberately not a boot service. Opening the panel again detects and starts the installed Runner.
 
 Runner control reuses the selected environment's authenticated T3 Terminal RPC, requiring at least one T3 thread on that host. The extension neither installs nor executes anything on an unselected environment. If Node or the T3 CLI is missing from that host, setup/start now reports an actionable error. Runner does not auto-download a different T3 version or silently fail queued tasks. Install the CLI on that same host, then refresh Runner and Start. If an old execution already failed with `spawn t3 ENOENT`, queue a **new** execution request; Runner does not replay historical failed requests automatically.
 
@@ -144,10 +144,9 @@ drains any active workers, runs `git pull --ff-only`, then restarts the Runner
 if it was previously running. No `git reset --hard` or forced overwrite.
 Manual Git pulls should be performed only while Runner is stopped.
 
-Durable state still lives in `~/.t3/runner/`: `projects.json`,
+Durable state lives under `~/t3-companion/.data/runner/`: `projects.json`,
 `config.json`, logs, lock and heartbeat. Project `.t3/tasks.json` and
-`.t3/runtime.json` are unchanged. Legacy `~/.t3/companion/runner` and `~/.t3/t3-companion` installs
-are detected for migration; the old executable files are not deleted.
+`.t3/runtime.json` are unchanged.
 
 Git and Node.js 22.16+ must be available on the selected T3 execution host.
 
@@ -160,9 +159,9 @@ POSIX `~` paths to native Git. No browser OS inference is used.
 The Runner executable stays under `~/t3-companion/runner/`. Its mutable data
 (`projects.json`, `config.json`, `runner.log`, `health.json`, locks and
 stop requests) lives in `~/t3-companion/.data/runner/`, ignored by Git.
-On the first Start, Companion imports existing `~/.t3/runner/` state only
-after the previous Runner has stopped; transient locks, stop signals and
-heartbeats are never imported. Previous files remain as a backup. If files
-conflict, migration fails explicitly instead of overwriting either copy.
+There is no automatic migration from earlier `~/.t3/runner/` installations.
+Before upgrading, stop the old Runner and manually copy `projects.json` and
+`config.json` into the new data directory, taking care not to overwrite newer
+state. Do not copy locks, stop signals or heartbeat files.
 The optional `T3_COMPANION_HOME` variable overrides the default runtime home.
 Per-project `.t3/tasks.json` and `.t3/runtime.json` remain unchanged.

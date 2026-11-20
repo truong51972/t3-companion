@@ -121,7 +121,7 @@ export function TaskDetailsModal({
                       ? 'Human review'
                       : execution?.workflowStage?.replaceAll('_', ' ') ||
                         execution?.status?.replaceAll('_', ' ') ||
-                        (request.notBefore ? 'scheduled / queued' : 'queued')}
+                        (request.execution.notBefore ? 'scheduled / queued' : 'queued')}
                   </span>
                   {execution?.pendingRequestCount ? (
                     <span className="request-error">
@@ -141,12 +141,9 @@ export function TaskDetailsModal({
                       {request.execution.modelSelection ? ' · ' + request.execution.modelSelection.model : ''}
                     </span>
                   )}
-                  {request.worktree && (
-                    <span className="muted">Worktree: {request.worktree}</span>
-                  )}
-                  {request.notBefore && (
+                  {request.execution.notBefore && (
                     <span className="muted">
-                      Not before: {new Date(request.notBefore).toLocaleString()}
+                      Not before: {new Date(request.execution.notBefore).toLocaleString()}
                     </span>
                   )}
                   {execution?.error && <span className="request-error">{execution.error}</span>}

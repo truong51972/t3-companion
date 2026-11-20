@@ -523,7 +523,6 @@ function App() {
           const status = JSON.parse(output) as {
             installed?: boolean;
             running?: boolean;
-            bridgeMissing?: boolean;
           };
           setRunnerCacheAt(null);
           setRunnerStatusError('');
@@ -532,7 +531,6 @@ function App() {
           });
           if (
             status.installed &&
-            !status.bridgeMissing &&
             !status.running &&
             enabled &&
             runnerAutoStartRef.current
@@ -767,7 +765,7 @@ function App() {
   }
 
   async function enqueue(task: Task) {
-    if (parsedRunner.installed && !parsedRunner.bridgeMissing && runnerHostAvailable)
+    if (parsedRunner.installed && runnerHostAvailable)
       await manageRunner('add');
     await mutateTask(
       task.id,
@@ -785,7 +783,6 @@ function App() {
               {
                 requestId: crypto.randomUUID(),
                 execution: config,
-                ...(config.notBefore ? { notBefore: config.notBefore } : {}),
               },
             ],
           };

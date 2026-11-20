@@ -32,7 +32,7 @@ test('dispatch once and preserve kanban status independently of runtime', async 
   await runRunner({ home, once: true, execute }); await runRunner({ home, once: true, execute });
   assert.equal(called, 1);
   assert.equal((await readTasks(project)).tasks[0].status, 'todo');
-  assert.equal((await readRuntime(project)).requests[task.executionRequests![0].requestId].reply, undefined, 'runtime should not duplicate full T3 replies');
+  assert.equal(Object.hasOwn((await readRuntime(project)).requests[task.executionRequests![0].requestId], 'reply'), false, 'runtime should not duplicate full T3 replies');
   assert.equal((await readRuntime(project)).requests[task.executionRequests![0].requestId].threadId, 'thread-42');
 });
 test('existing dispatching request becomes needs_reconciliation and is not retried', async t => {
@@ -93,7 +93,7 @@ test('scheduled future request is not dispatched', async t => {
   const { project, home } = await sandbox(t); await registerProject(project, home);
   const a = await createTask(project, 'Future', 'not yet');
   const doc = await readTasks(project);
-  doc.tasks[0].executionRequests![0].notBefore = new Date(Date.now() + 60_000).toISOString();
+  doc.tasks[0].executionRequests![0].execution.notBefore = new Date(Date.now() + 60_000).toISOString();
   await atomicWrite(filesFor(project).tasks, doc);
   let called = false;
   await runRunner({ home, once: true, execute: async () => { called = true; return { status: 'completed' }; } });
@@ -122,7 +122,7 @@ test('T3 adapter safely passes prompt via stdin and accepts JSON result',
   process.env.T3_COMPANION_T3_BIN = mock;
   try {
     const prompt = 'Do not expand $(pwd) or `echo hi`';
-    const response = await executeT3(project, { id: 'x', title: 'A', status: 'todo', prompt }, { requestId: 'y' });
+    const response = await executeT3(project, { id: 'x', title: 'A', status: 'todo', prompt }, { requestId: 'y', execution: { workspace: 'root' } });
     assert.equal(response.status, 'completed');
     assert.equal(response.reply, prompt);
     assert.equal(response.threadId, 'test-thread');
@@ -148,10 +148,9 @@ test('auto workspace resolves the selected Git branch, without hardcoded main', 
   const { project } = await sandbox(t);
   const init = spawnSync('git', ['init', '-b', 'feature/test', project], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);
-  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'auto' }), 'feature/test');
-  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'worktree', worktree: 'release' }), 'release');
-  assert.equal(workspaceBaseFor(project, { requestId: 'x', workspace: 'root', worktree: 'release' }), null);
-  assert.equal(workspaceBaseFor(project, { requestId: 'x' }), null, 'legacy requests stay in root');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', execution: { workspace: 'auto' } }), 'feature/test');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', execution: { workspace: 'worktree', baseRef: 'release' } }), 'release');
+  assert.equal(workspaceBaseFor(project, { requestId: 'x', execution: { workspace: 'root' } }), null);
 });
 test('new task snapshots honor workspace, base ref and scheduled not-before', async t => {
   const { project, home } = await sandbox(t);
@@ -166,7 +165,7 @@ test('new task snapshots honor workspace, base ref and scheduled not-before', as
   doc.tasks[0].execution = { ...configured };
   doc.tasks[0].executionRequests![0] = {
     requestId: task.executionRequests![0].requestId,
-    execution: { ...configured }, notBefore: configured.notBefore,
+    execution: { ...configured },
   };
   await atomicWrite(filesFor(project).tasks, doc);
   let called = false;
@@ -210,7 +209,7 @@ test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async 
   const a = await createTask(project, 'A', 'one');
   const b = await createTask(project, 'B', 'two');
   const doc = await readTasks(project);
-  for (const task of doc.tasks) task.executionRequests![0].workspace = 'auto';
+  for (const task of doc.tasks) task.executionRequests![0].execution.workspace = 'auto';
   await atomicWrite(filesFor(project).tasks, doc);
   let active = 0, peak = 0;
   const execute = async () => {
@@ -227,8 +226,8 @@ test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async 
   assert.equal(init.status, 0, init.stderr);
   // Existing completed request does not re-run; the next run can execute other isolated requests.
   const next = await readTasks(project);
-  next.tasks[0].executionRequests!.push({ requestId: 'git-1', workspace: 'auto' });
-  next.tasks[1].executionRequests!.push({ requestId: 'git-2', workspace: 'auto' });
+  next.tasks[0].executionRequests!.push({ requestId: 'git-1', execution: { workspace: 'auto' } });
+  next.tasks[1].executionRequests!.push({ requestId: 'git-2', execution: { workspace: 'auto' } });
   await atomicWrite(filesFor(project).tasks, next);
   // Hold the first worker until another worker has started. Timing-based
   // peak measurements were flaky under CPU pressure in GitHub Actions.
@@ -246,15 +245,14 @@ test('auto worktree serializes non-Git tasks but parallelizes Git tasks', async 
   assert.ok(peak >= 2 && peak <= 3, 'Git auto workspace supports parallel execution up to the pool cap');
   assert.equal(a.title, 'A'); assert.equal(b.title, 'B');
 });
-test('explicit root request stays serialized even with a baseRef field', async t => {
+test('explicit root request stays serialized across a worker pool', async t => {
   const { project, home } = await sandbox(t);
   await registerProject(project, home);
   await createTask(project, 'A', 'one');
   await createTask(project, 'B', 'two');
   const doc = await readTasks(project);
   for (const task of doc.tasks) {
-    task.executionRequests![0].workspace = 'root';
-    task.executionRequests![0].worktree = 'unexpected-legacy-base';
+    task.executionRequests![0].execution = { workspace: 'root' };
   }
   await atomicWrite(filesFor(project).tasks, doc);
   let active = 0, peak = 0;

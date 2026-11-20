@@ -73,10 +73,7 @@ function validate(doc) {
     ids.add(task.id);
     for (const request of task.executionRequests || []) {
       if (!request || typeof request.requestId !== 'string' || !request.requestId || requestIds.has(request.requestId) ||
-          (request.worktree !== undefined && typeof request.worktree !== 'string') ||
-          (request.workspace !== undefined && !['auto','root','worktree'].includes(request.workspace)) ||
-          (request.notBefore !== undefined && typeof request.notBefore !== 'string') ||
-          (request.execution !== undefined && !validExecution(request.execution))) {
+          !validExecution(request.execution)) {
         throw new Error('Invalid execution request in tasks.json; refusing to overwrite');
       }
       requestIds.add(request.requestId);
@@ -165,7 +162,6 @@ async function main() {
     const execution = structuredClone(task.execution || { workspace: 'auto' });
     if (!validExecution(execution)) throw new Error('Invalid saved task execution settings');
     const request = { requestId: randomUUID(), execution };
-    if (execution.notBefore) request.notBefore = execution.notBefore;
     task.status = 'todo';
     task.statusOverride = false;
     task.executionRequests ??= [];
